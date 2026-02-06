@@ -61,6 +61,21 @@ function generateMask(
   const [_, numProtos, protoH, protoW] = dims; // [1, 32, 160, 160]
   const outputSize = protoH * protoW; // 25,600 pixels
 
+  // Debug: Check input data
+  console.log('[Mask Gen] Input check:', {
+    dims,
+    numProtos,
+    protoH,
+    protoW,
+    outputSize,
+    coeffsLength: coeffs.length,
+    protosLength: protos.length,
+    coeffsSample: Array.from(coeffs.slice(0, 5)),
+    protosSample: Array.from(protos.slice(0, 5)),
+    coeffsHasNaN: Array.from(coeffs).some(v => isNaN(v)),
+    protosHasNaN: Array.from(protos).some(v => isNaN(v)),
+  });
+
   // Matrix multiplication: (1x32) @ (32x25600) = (1x25600)
   // Each prototype is weighted by its coefficient
   const mask = new Float32Array(outputSize);

@@ -123,8 +123,8 @@ async function runInference(
     // Step 2: Run ONNX inference
     const outputs = await session.run({ images: inputTensor });
 
-    // YOLOv8-seg outputs:
-    // output0: [1, 116, 8400] - Detection boxes + class scores + mask coefficients
+    // YOLOv8-seg outputs (custom 12-class model):
+    // output0: [1, 48, 8400] - Detection boxes (4) + class scores (12) + mask coefficients (32)
     // output1: [1, 32, 160, 160] - Mask prototypes
 
     const output0 = outputs.output0; // Detection tensor
@@ -134,13 +134,34 @@ async function runInference(
       throw new Error('Missing model outputs');
     }
 
+    // Debug: Check ONNX outputs
+    const output0Data = output0.data as Float32Array;
+    const output1Data = output1.data as Float32Array;
+    console.log('[Worker] ONNX outputs:', {
+      output0Dims: [...output0.dims],
+      output1Dims: [...output1.dims],
+      output0Sample: Array.from(output0Data.slice(0, 5)),
+      output1Sample: Array.from(output1Data.slice(0, 5)),
+      output0HasNaN: Array.from(output0Data.slice(0, 1000)).some(v => isNaN(v)),
+      output1HasNaN: Array.from(output1Data.slice(0, 1000)).some(v => isNaN(v)),
+    });
+
     // Step 3: Parse YOLO outputs to raw detections
     const rawDetections = parseYOLOOutput(
-      output0.data as Float32Array,
+      output0Data,
       [...output0.dims] // Convert readonly array to mutable
     );
 
     console.log(`[Worker] Parsed ${rawDetections.length} raw detections`);
+
+    // Debug: Check first detection's mask coefficients
+    if (rawDetections.length > 0) {
+      console.log('[Worker] First detection maskCoeffs:', {
+        length: rawDetections[0].maskCoeffs.length,
+        sample: Array.from(rawDetections[0].maskCoeffs.slice(0, 5)),
+        hasNaN: Array.from(rawDetections[0].maskCoeffs).some(v => isNaN(v)),
+      });
+    }
 
     // Step 4: Apply Non-Maximum Suppression
     const filteredDetections = applyNMS(rawDetections);
@@ -186,7 +207,7 @@ async function runInference(
 
 /**
  * Parse YOLOv8 segmentation output to raw detections
- * @param data - Output0 tensor data [1, 116, 8400]
+ * @param data - Output0 tensor data [1, 48, 8400]
  * @param dims - Tensor dimensions
  * @returns Array of raw detections
  */
@@ -196,10 +217,11 @@ function parseYOLOOutput(
 ): RawDetection[] {
   const [batch, channels, numAnchors] = dims; // [1, 116, 8400]
 
-  // YOLOv8-seg format:
+  // YOLOv8-seg format for our custom model:
   // First 4 channels: bbox (x_center, y_center, width, height)
-  // Next 80 channels: class probabilities (but we only have 12 classes)
+  // Next 12 channels: class probabilities (12 food classes)
   // Last 32 channels: mask coefficients
+  // Total: 4 + 12 + 32 = 48 channels
 
   const numClasses = 12; // Our food classes
   const numMaskCoeffs = 32;
@@ -214,7 +236,7 @@ function parseYOLOOutput(
     const w = data[2 * numAnchors + i]; // width
     const h = data[3 * numAnchors + i]; // height
 
-    // Extract class scores (channels 4 to 4+numClasses)
+    // Extract class scores (channels 4 to 15)
     const classScores = new Float32Array(numClasses);
     for (let c = 0; c < numClasses; c++) {
       classScores[c] = data[(4 + c) * numAnchors + i];
@@ -235,10 +257,10 @@ function parseYOLOOutput(
       continue;
     }
 
-    // Extract mask coefficients (last 32 channels)
+    // Extract mask coefficients (channels 16 to 47)
     const maskCoeffs = new Float32Array(numMaskCoeffs);
     for (let m = 0; m < numMaskCoeffs; m++) {
-      maskCoeffs[m] = data[(4 + 80 + m) * numAnchors + i];
+      maskCoeffs[m] = data[(4 + numClasses + m) * numAnchors + i];
     }
 
     // Normalize bbox coordinates to [0, 1]
