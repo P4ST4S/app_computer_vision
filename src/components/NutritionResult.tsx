@@ -81,10 +81,6 @@ const NutritionResult = ({ data, onDismiss }: NutritionResultProps) => {
             max={NUTRIENT_LIMITS.fiber}
             colorClass="bg-nutrient-fiber"
           />
-
-          <p className="pt-2 text-center text-xs text-[hsl(var(--color-muted-foreground))]">
-            ⚠️ Données simulées — API non connectée
-          </p>
         </CardContent>
       </Card>
     </div>
