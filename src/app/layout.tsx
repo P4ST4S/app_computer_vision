@@ -1,0 +1,49 @@
+import type { Metadata } from "next";
+import { Inter, Space_Grotesk } from "next/font/google";
+import "./globals.css";
+
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  display: 'swap',
+});
+
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
+  subsets: ["latin"],
+  display: 'swap',
+});
+
+export const metadata: Metadata = {
+  title: "NutriScan - Scanner nutritionnel",
+  description: "Scannez vos aliments et découvrez leurs informations nutritionnelles instantanément",
+  keywords: ["nutrition", "scanner", "aliments", "calories", "santé"],
+  authors: [{ name: "NutriScan Team" }],
+  creator: "NutriScan",
+  openGraph: {
+    title: "NutriScan - Scanner nutritionnel",
+    description: "Scannez vos aliments et découvrez leurs informations nutritionnelles instantanément",
+    type: "website",
+    locale: "fr_FR",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="fr">
+      <body
+        className={`${inter.variable} ${spaceGrotesk.variable} antialiased`}
+      >
+        {children}
+      </body>
+    </html>
+  );
+}

@@ -1,0 +1,142 @@
+
+@import "tailwindcss";
+
+/* NutriScan Design System - Bold, health-oriented aesthetic */
+
+@theme {
+  --color-background: 150 20% 97%;
+  --color-foreground: 160 30% 8%;
+
+  --color-card: 0 0% 100%;
+  --color-card-foreground: 160 30% 8%;
+
+  --color-popover: 0 0% 100%;
+  --color-popover-foreground: 160 30% 8%;
+
+  --color-primary: 152 60% 42%;
+  --color-primary-foreground: 0 0% 100%;
+
+  --color-secondary: 160 25% 92%;
+  --color-secondary-foreground: 160 30% 15%;
+
+  --color-muted: 150 15% 93%;
+  --color-muted-foreground: 160 10% 45%;
+
+  --color-accent: 38 90% 55%;
+  --color-accent-foreground: 38 90% 12%;
+
+  --color-destructive: 0 72% 55%;
+  --color-destructive-foreground: 0 0% 100%;
+
+  --color-border: 150 15% 88%;
+  --color-input: 150 15% 88%;
+  --color-ring: 152 60% 42%;
+
+  --radius: 0.75rem;
+}
+
+@layer base {
+  :root {
+    --scanner-glow: 152 70% 50%;
+    --nutrient-protein: 210 70% 55%;
+    --nutrient-carbs: 38 90% 55%;
+    --nutrient-fat: 0 65% 55%;
+    --nutrient-fiber: 152 60% 42%;
+  }
+
+  .dark {
+    --color-background: 160 25% 6%;
+    --color-foreground: 150 15% 95%;
+
+    --color-card: 160 20% 10%;
+    --color-card-foreground: 150 15% 95%;
+
+    --color-popover: 160 20% 10%;
+    --color-popover-foreground: 150 15% 95%;
+
+    --color-primary: 152 60% 48%;
+    --color-primary-foreground: 0 0% 100%;
+
+    --color-secondary: 160 20% 15%;
+    --color-secondary-foreground: 150 15% 90%;
+
+    --color-muted: 160 15% 18%;
+    --color-muted-foreground: 150 10% 55%;
+
+    --color-accent: 38 85% 55%;
+    --color-accent-foreground: 38 90% 95%;
+
+    --color-destructive: 0 62% 45%;
+    --color-destructive-foreground: 0 0% 100%;
+
+    --color-border: 160 15% 18%;
+    --color-input: 160 15% 18%;
+    --color-ring: 152 60% 48%;
+
+    --scanner-glow: 152 70% 55%;
+    --nutrient-protein: 210 65% 60%;
+    --nutrient-carbs: 38 85% 60%;
+    --nutrient-fat: 0 60% 60%;
+    --nutrient-fiber: 152 55% 50%;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--color-border));
+  }
+
+  body {
+    background-color: hsl(var(--color-background));
+    color: hsl(var(--color-foreground));
+    font-family: var(--font-inter), 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-space-grotesk), 'Space Grotesk', sans-serif;
+  }
+}
+
+@layer utilities {
+  .bg-nutrient-protein {
+    background-color: hsl(var(--nutrient-protein));
+  }
+
+  .bg-nutrient-carbs {
+    background-color: hsl(var(--nutrient-carbs));
+  }
+
+  .bg-nutrient-fat {
+    background-color: hsl(var(--nutrient-fat));
+  }
+
+  .bg-nutrient-fiber {
+    background-color: hsl(var(--nutrient-fiber));
+  }
+
+  .scanner-pulse {
+    animation: scanner-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes scanner-pulse {
+    0%, 100% {
+      box-shadow: 0 0 0 0 hsl(var(--scanner-glow) / 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 12px hsl(var(--scanner-glow) / 0);
+    }
+  }
+
+  .scan-line {
+    animation: scan-line 2s ease-in-out infinite;
+  }
+
+  @keyframes scan-line {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(100%);
+    }
+  }
+}
