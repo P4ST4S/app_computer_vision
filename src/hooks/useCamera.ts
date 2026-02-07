@@ -12,13 +12,13 @@ export function useCamera() {
   const startCamera = useCallback(async () => {
     try {
       setError(null);
-      
+
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("L'API getUserMedia n'est pas supportée par ce navigateur");
       }
-      
+
       let stream: MediaStream;
-      
+
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: CAMERA_CONFIG,
@@ -29,23 +29,13 @@ export function useCamera() {
           video: true,
         });
       }
-      
+
       streamRef.current = stream;
-      
-      if (videoRef.current) {
-        // IMPORTANT: Définir srcObject AVANT toute autre opération
-        videoRef.current.srcObject = stream;
-        
-        // Forcer le démarrage de la lecture
-        videoRef.current.play().catch((err) => {
-          console.error("Erreur play():", err);
-        });
-      }
-      
+      // Set active first so the <video> element mounts in the DOM
       setIsActive(true);
     } catch (err: any) {
       let errorMessage = "Impossible d'accéder à la caméra.";
-      
+
       if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
         errorMessage = "Permission refusée. Autorisez l'accès à la caméra.";
       } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
@@ -53,7 +43,7 @@ export function useCamera() {
       } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
         errorMessage = "Caméra déjà utilisée par une autre application.";
       }
-      
+
       setError(errorMessage);
       setIsActive(false);
     }
@@ -80,6 +70,16 @@ export function useCamera() {
     ctx.drawImage(videoRef.current, 0, 0);
     return canvas.toDataURL("image/jpeg", 0.8);
   }, []);
+
+  // Assign stream to video element once it's mounted
+  useEffect(() => {
+    if (isActive && streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch((err) => {
+        console.error("Erreur play():", err);
+      });
+    }
+  }, [isActive]);
 
   useEffect(() => {
     return () => {
