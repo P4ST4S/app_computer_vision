@@ -7,6 +7,14 @@ import type { RawDetection, BoundingBox } from './types';
 import { INFERENCE_CONFIG } from '@/lib/constants';
 
 /**
+ * Confusion groups: classes the model often confuses.
+ * Cross-class NMS is applied within each group.
+ */
+const CONFUSION_GROUPS: number[][] = [
+  [2, 6, 10], // chicken (2), steak (6), pork (10) — meat confusion
+];
+
+/**
  * Apply Non-Maximum Suppression to filter overlapping detections
  * @param detections - Array of raw detections from YOLO output
  * @param confThreshold - Minimum confidence score (default: 0.25)
@@ -28,30 +36,23 @@ export function applyNMS(
   // Step 2: Sort by confidence (descending - highest first)
   filtered.sort((a, b) => b.confidence - a.confidence);
 
-  // Step 3: Apply NMS - keep highest confidence, suppress overlapping boxes
+  // Step 3: Apply per-class NMS — suppress same-class overlapping boxes
   const result: RawDetection[] = [];
   const suppressed = new Set<number>();
 
   for (let i = 0; i < filtered.length; i++) {
-    // Skip if already suppressed
     if (suppressed.has(i)) continue;
 
-    // Keep this detection
     const currentDetection = filtered[i];
     result.push(currentDetection);
 
-    // Check all remaining detections
     for (let j = i + 1; j < filtered.length; j++) {
-      // Skip if already suppressed
       if (suppressed.has(j)) continue;
 
       const otherDetection = filtered[j];
 
-      // Only compare boxes of the same class
       if (currentDetection.classId === otherDetection.classId) {
         const iou = calculateIoU(currentDetection.box, otherDetection.box);
-
-        // Suppress if IoU is too high (too much overlap)
         if (iou > iouThreshold) {
           suppressed.add(j);
         }
@@ -59,7 +60,53 @@ export function applyNMS(
     }
   }
 
-  return result;
+  // Step 4: Cross-class NMS for confusion groups (e.g. steak vs pork)
+  // If two detections from the same confusion group overlap, keep the higher confidence one
+  return applyCrossClassNMS(result, iouThreshold);
+}
+
+/**
+ * Cross-class NMS: suppress lower-confidence detections from confusion groups
+ * when they significantly overlap a higher-confidence detection in the same group.
+ */
+function applyCrossClassNMS(
+  detections: RawDetection[],
+  iouThreshold: number
+): RawDetection[] {
+  // Build a set of class IDs that belong to any confusion group
+  const classToGroup = new Map<number, number>();
+  CONFUSION_GROUPS.forEach((group, groupIdx) => {
+    for (const classId of group) {
+      classToGroup.set(classId, groupIdx);
+    }
+  });
+
+  // Already sorted by confidence (descending) from previous step
+  const kept: RawDetection[] = [];
+  const suppressed = new Set<number>();
+
+  for (let i = 0; i < detections.length; i++) {
+    if (suppressed.has(i)) continue;
+    kept.push(detections[i]);
+
+    const groupI = classToGroup.get(detections[i].classId);
+    if (groupI === undefined) continue; // not in any confusion group
+
+    for (let j = i + 1; j < detections.length; j++) {
+      if (suppressed.has(j)) continue;
+
+      const groupJ = classToGroup.get(detections[j].classId);
+      // Same confusion group but different class
+      if (groupJ === groupI && detections[j].classId !== detections[i].classId) {
+        const iou = calculateIoU(detections[i].box, detections[j].box);
+        if (iou > iouThreshold) {
+          suppressed.add(j);
+        }
+      }
+    }
+  }
+
+  return kept;
 }
 
 /**

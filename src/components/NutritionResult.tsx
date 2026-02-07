@@ -10,9 +10,10 @@ import { NUTRIENT_LIMITS } from "@/lib/constants";
 interface NutritionResultProps {
   items: NutritionData[];
   onDismiss: () => void;
+  onRemoveItem: (index: number) => void;
 }
 
-const NutritionResult = ({ items, onDismiss }: NutritionResultProps) => {
+const NutritionResult = ({ items, onDismiss, onRemoveItem }: NutritionResultProps) => {
   const totalCalories = items.reduce((sum, i) => sum + i.calories, 0);
   const totalProtein = items.reduce((sum, i) => sum + i.protein, 0);
   const totalCarbs = items.reduce((sum, i) => sum + i.carbs, 0);
@@ -64,9 +65,18 @@ const NutritionResult = ({ items, onDismiss }: NutritionResultProps) => {
                     </p>
                   </div>
                 </div>
-                <p className="font-heading text-sm font-bold text-[hsl(var(--color-foreground))]">
-                  {item.calories} kcal
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="font-heading text-sm font-bold text-[hsl(var(--color-foreground))]">
+                    {item.calories} kcal
+                  </p>
+                  <button
+                    onClick={() => onRemoveItem(index)}
+                    className="flex h-6 w-6 items-center justify-center rounded-full text-[hsl(var(--color-muted-foreground))] transition-colors hover:bg-[hsl(var(--color-destructive))]/10 hover:text-[hsl(var(--color-destructive))]"
+                    aria-label={`Supprimer ${item.name}`}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

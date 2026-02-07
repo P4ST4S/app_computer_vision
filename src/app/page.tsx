@@ -91,6 +91,13 @@ export default function Home() {
     }
   }, [isReady, runInference]);
 
+  const handleRemoveItem = useCallback((index: number) => {
+    setCurrentResults((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      return next;
+    });
+  }, []);
+
   const handleDismiss = useCallback(() => {
     setCurrentResults([]);
   }, []);
@@ -136,7 +143,7 @@ export default function Home() {
         )}
 
         {currentResults.length > 0 && (
-          <NutritionResult items={currentResults} onDismiss={handleDismiss} />
+          <NutritionResult items={currentResults} onDismiss={handleDismiss} onRemoveItem={handleRemoveItem} />
         )}
 
         <ScanHistory items={history} />
