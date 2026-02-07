@@ -13,7 +13,7 @@ import { Camera, Upload } from "lucide-react";
 
 export default function Home() {
   const [isScanning, setIsScanning] = useState(false);
-  const [currentResult, setCurrentResult] = useState<NutritionData | null>(null);
+  const [currentResults, setCurrentResults] = useState<NutritionData[]>([]);
   const [history, setHistory] = useState<NutritionData[]>([]);
   const [activeTab, setActiveTab] = useState<'camera' | 'upload'>('camera');
 
@@ -33,40 +33,58 @@ export default function Home() {
       // Run real AI inference
       const inferenceResult = await runInference(imageData);
 
-      // Convert inference result to NutritionData format
-      const result: NutritionData = {
-        name: inferenceResult.detections.length > 0
-          ? inferenceResult.detections[0].label
-          : 'Non détecté',
-        calories: Math.round(inferenceResult.totalCalories),
-        protein: Math.round(
-          inferenceResult.detections.reduce((sum, d) => sum + d.nutrition.protein, 0)
-        ),
-        carbs: Math.round(
-          inferenceResult.detections.reduce((sum, d) => sum + d.nutrition.carbs, 0)
-        ),
-        fat: Math.round(
-          inferenceResult.detections.reduce((sum, d) => sum + d.nutrition.fat, 0)
-        ),
-        fiber: Math.round(
-          inferenceResult.detections.reduce((sum, d) => sum + d.nutrition.fiber, 0)
-        ),
-        serving: `${Math.round(
-          inferenceResult.detections.reduce((sum, d) => sum + d.nutrition.weightGrams, 0)
-        )}g`,
-        icon: inferenceResult.detections.length > 0
-          ? inferenceResult.detections[0].icon
-          : '❓',
-      };
+      // Merge detections of the same class
+      const merged = new Map<string, NutritionData>();
+      for (const d of inferenceResult.detections) {
+        const existing = merged.get(d.label);
+        if (existing) {
+          existing.calories += d.nutrition.calories;
+          existing.protein += d.nutrition.protein;
+          existing.carbs += d.nutrition.carbs;
+          existing.fat += d.nutrition.fat;
+          existing.fiber += d.nutrition.fiber;
+          existing.serving = `${Math.round(
+            parseFloat(existing.serving) + d.nutrition.weightGrams
+          )}g`;
+        } else {
+          merged.set(d.label, {
+            name: d.label,
+            calories: d.nutrition.calories,
+            protein: d.nutrition.protein,
+            carbs: d.nutrition.carbs,
+            fat: d.nutrition.fat,
+            fiber: d.nutrition.fiber,
+            serving: `${Math.round(d.nutrition.weightGrams)}g`,
+            icon: d.icon,
+          });
+        }
+      }
 
-      setCurrentResult(result);
-      setHistory((prev) => [result, ...prev].slice(0, MAX_HISTORY_ITEMS));
+      const results: NutritionData[] = Array.from(merged.values()).map((r) => ({
+        ...r,
+        calories: Math.round(r.calories),
+        protein: Math.round(r.protein),
+        carbs: Math.round(r.carbs),
+        fat: Math.round(r.fat),
+        fiber: Math.round(r.fiber),
+      }));
+
+      if (results.length === 0) {
+        results.push({
+          name: 'Non détecté',
+          calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0,
+          serving: '0g', icon: '❓',
+        });
+      }
+
+      setCurrentResults(results);
+      setHistory((prev) => [...results, ...prev].slice(0, MAX_HISTORY_ITEMS));
     } catch (error) {
       console.error('[App] Inference failed:', error);
 
       // Fallback to mock data on error
       const fallbackResult = getRandomNutrition();
-      setCurrentResult(fallbackResult);
+      setCurrentResults([fallbackResult]);
       setHistory((prev) => [fallbackResult, ...prev].slice(0, MAX_HISTORY_ITEMS));
     } finally {
       setIsScanning(false);
@@ -74,7 +92,7 @@ export default function Home() {
   }, [isReady, runInference]);
 
   const handleDismiss = useCallback(() => {
-    setCurrentResult(null);
+    setCurrentResults([]);
   }, []);
 
   return (
@@ -117,8 +135,8 @@ export default function Home() {
           <ImageUploader onUpload={handleScan} isProcessing={isScanning} />
         )}
 
-        {currentResult && (
-          <NutritionResult data={currentResult} onDismiss={handleDismiss} />
+        {currentResults.length > 0 && (
+          <NutritionResult items={currentResults} onDismiss={handleDismiss} />
         )}
 
         <ScanHistory items={history} />
