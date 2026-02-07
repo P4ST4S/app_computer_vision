@@ -4,7 +4,7 @@
  * Data includes density, thickness, and macronutrients per 100g
  */
 
-import type { FoodInfo } from './types';
+import type { FoodInfo } from "./types";
 
 /**
  * Complete nutrition database for 12 food classes
@@ -17,7 +17,7 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
   0: {
     // bread
     id: 0,
-    name: 'Pain',
+    name: "Pain",
     density: 0.25, // g/cm³ - bread is lightweight and airy
     defaultThicknessCm: 2.0, // typical slice thickness
     caloriesPer100g: 265,
@@ -25,12 +25,12 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 49.0,
     fatPer100g: 3.2,
     fiberPer100g: 2.7,
-    icon: '🍞',
+    icon: "🍞",
   },
   1: {
     // onion
     id: 1,
-    name: 'Oignon',
+    name: "Oignon",
     density: 0.55, // g/cm³ - moderate density vegetable
     defaultThicknessCm: 1.5, // sliced onion typical thickness
     caloriesPer100g: 40,
@@ -38,12 +38,12 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 9.3,
     fatPer100g: 0.1,
     fiberPer100g: 1.7,
-    icon: '🧅',
+    icon: "🧅",
   },
   2: {
     // chicken_duck
     id: 2,
-    name: 'Poulet',
+    name: "Poulet",
     density: 0.95, // g/cm³ - cooked poultry density
     defaultThicknessCm: 2.5, // chicken breast thickness
     caloriesPer100g: 165,
@@ -51,12 +51,12 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 0.0,
     fatPer100g: 3.6,
     fiberPer100g: 0.0,
-    icon: '🍗',
+    icon: "🍗",
   },
   3: {
     // sauce
     id: 3,
-    name: 'Sauce',
+    name: "Sauce",
     density: 1.1, // g/cm³ - liquid/semi-liquid density
     defaultThicknessCm: 0.5, // thin layer of sauce
     caloriesPer100g: 80,
@@ -64,12 +64,12 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 8.0,
     fatPer100g: 4.5,
     fiberPer100g: 0.5,
-    icon: '🥫',
+    icon: "🥫",
   },
   4: {
     // tomato
     id: 4,
-    name: 'Tomate',
+    name: "Tomate",
     density: 0.95, // g/cm³ - high water content
     defaultThicknessCm: 1.0, // sliced tomato thickness
     caloriesPer100g: 18,
@@ -77,12 +77,12 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 3.9,
     fatPer100g: 0.2,
     fiberPer100g: 1.2,
-    icon: '🍅',
+    icon: "🍅",
   },
   5: {
     // potato
     id: 5,
-    name: 'Pomme de terre',
+    name: "Pomme de terre",
     density: 0.7, // g/cm³ - starchy vegetable
     defaultThicknessCm: 2.0, // cooked potato piece thickness
     caloriesPer100g: 77,
@@ -90,25 +90,25 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 17.5,
     fatPer100g: 0.1,
     fiberPer100g: 2.2,
-    icon: '🥔',
+    icon: "🥔",
   },
   6: {
     // steak
     id: 6,
-    name: 'Steak',
+    name: "Steak",
     density: 1.05, // g/cm³ - dense cooked meat
-    defaultThicknessCm: 2.0, // typical steak thickness
+    defaultThicknessCm: 1.2, // typical steak thickness
     caloriesPer100g: 271,
     proteinPer100g: 25.0,
     carbsPer100g: 0.0,
     fatPer100g: 19.0,
     fiberPer100g: 0.0,
-    icon: '🥩',
+    icon: "🥩",
   },
   7: {
     // french_bean
     id: 7,
-    name: 'Haricot vert',
+    name: "Haricot vert",
     density: 0.6, // g/cm³ - lightweight vegetable
     defaultThicknessCm: 0.8, // thin bean thickness
     caloriesPer100g: 31,
@@ -116,12 +116,12 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 7.0,
     fatPer100g: 0.2,
     fiberPer100g: 2.7,
-    icon: '🫘',
+    icon: "🫘",
   },
   8: {
     // mixed_vegetables
     id: 8,
-    name: 'Légumes mélangés',
+    name: "Légumes mélangés",
     density: 0.65, // g/cm³ - average of various vegetables
     defaultThicknessCm: 1.5, // mixed vegetable pile thickness
     caloriesPer100g: 40,
@@ -129,12 +129,12 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 8.0,
     fatPer100g: 0.3,
     fiberPer100g: 3.0,
-    icon: '🥗',
+    icon: "🥗",
   },
   9: {
     // ice_cream
     id: 9,
-    name: 'Glace',
+    name: "Glace",
     density: 0.55, // g/cm³ - frozen dessert with air incorporation
     defaultThicknessCm: 3.0, // scoop thickness
     caloriesPer100g: 207,
@@ -142,12 +142,12 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 24.0,
     fatPer100g: 11.0,
     fiberPer100g: 0.7,
-    icon: '🍨',
+    icon: "🍨",
   },
   10: {
     // pork
     id: 10,
-    name: 'Porc',
+    name: "Porc",
     density: 1.0, // g/cm³ - cooked pork density
     defaultThicknessCm: 2.0, // pork chop/slice thickness
     caloriesPer100g: 242,
@@ -155,12 +155,12 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 0.0,
     fatPer100g: 14.0,
     fiberPer100g: 0.0,
-    icon: '🥓',
+    icon: "🥓",
   },
   11: {
     // rice
     id: 11,
-    name: 'Riz',
+    name: "Riz",
     density: 0.75, // g/cm³ - cooked rice density
     defaultThicknessCm: 2.0, // rice pile thickness
     caloriesPer100g: 130,
@@ -168,7 +168,7 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
     carbsPer100g: 28.0,
     fatPer100g: 0.3,
     fiberPer100g: 0.4,
-    icon: '🍚',
+    icon: "🍚",
   },
 };
 
@@ -178,7 +178,7 @@ const FOOD_DATABASE: Record<number, FoodInfo> = {
  */
 const FALLBACK_FOOD_INFO: FoodInfo = {
   id: -1,
-  name: 'Aliment inconnu',
+  name: "Aliment inconnu",
   density: 0.5,
   defaultThicknessCm: 1.5,
   caloriesPer100g: 100,
@@ -186,7 +186,7 @@ const FALLBACK_FOOD_INFO: FoodInfo = {
   carbsPer100g: 15.0,
   fatPer100g: 3.0,
   fiberPer100g: 1.0,
-  icon: '❓',
+  icon: "❓",
 };
 
 /**
