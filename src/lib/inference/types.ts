@@ -11,18 +11,18 @@
  * Message types sent from main thread to worker
  */
 export type WorkerRequest =
-  | { id: string; type: 'INIT' }
-  | { id: string; type: 'INFER'; payload: { imageData: string | ImageBitmap } }
-  | { id: string; type: 'TERMINATE' };
+  | { id: string; type: "INIT" }
+  | { id: string; type: "INFER"; payload: { imageData: string | ImageBitmap } }
+  | { id: string; type: "TERMINATE" };
 
 /**
  * Response types sent from worker to main thread
  */
 export type WorkerResponse =
-  | { id: string; type: 'INIT_SUCCESS' }
-  | { id: string; type: 'INFER_SUCCESS'; payload: InferenceResult }
-  | { id: string; type: 'TERMINATE_SUCCESS' }
-  | { id: string; type: 'ERROR'; payload: { message: string } };
+  | { id: string; type: "INIT_SUCCESS" }
+  | { id: string; type: "INFER_SUCCESS"; payload: InferenceResult }
+  | { id: string; type: "TERMINATE_SUCCESS" }
+  | { id: string; type: "ERROR"; payload: { message: string } };
 
 // ============================================================================
 // Inference Result Types
@@ -46,7 +46,7 @@ export interface InferenceResult {
  * Single food detection with segmentation mask and nutrition
  */
 export interface Detection {
-  /** Class ID from YOLO model (0-11 for 12 food classes) */
+  /** Class ID from YOLO model (0-31 for 32 food classes) */
   classId: number;
   /** Human-readable food label (e.g., "Pain", "Poulet") */
   label: string;
@@ -103,7 +103,7 @@ export interface NutritionInfo {
  * Used for calorie calculation algorithm
  */
 export interface FoodInfo {
-  /** Class ID (0-11) */
+  /** Class ID (0-31) */
   id: number;
   /** Food name in French */
   name: string;

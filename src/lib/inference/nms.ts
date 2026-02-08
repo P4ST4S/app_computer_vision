@@ -3,15 +3,18 @@
  * Filters overlapping bounding boxes to keep only the highest confidence detections
  */
 
-import type { RawDetection, BoundingBox } from './types';
-import { INFERENCE_CONFIG } from '@/lib/constants';
+import type { RawDetection, BoundingBox } from "./types";
+import { INFERENCE_CONFIG } from "@/lib/constants";
 
 /**
  * Confusion groups: classes the model often confuses.
  * Cross-class NMS is applied within each group.
  */
 const CONFUSION_GROUPS: number[][] = [
-  [2, 6, 10], // chicken (2), steak (6), pork (10) — meat confusion
+  [3, 4, 5, 23], // chicken (3), pork (4), steak (5), fried_meat (23) — meat confusion
+  [6, 7], // fish (6), shrimp (7) — seafood confusion
+  [10, 11], // noodles (10), pasta (11) — noodle confusion
+  [19, 20, 24], // spinach (19), cabbage (20), salad (24) — leafy greens confusion
 ];
 
 /**
@@ -24,7 +27,7 @@ const CONFUSION_GROUPS: number[][] = [
 export function applyNMS(
   detections: RawDetection[],
   confThreshold: number = INFERENCE_CONFIG.CONFIDENCE_THRESHOLD,
-  iouThreshold: number = INFERENCE_CONFIG.IOU_THRESHOLD
+  iouThreshold: number = INFERENCE_CONFIG.IOU_THRESHOLD,
 ): RawDetection[] {
   // Step 1: Filter by confidence threshold
   const filtered = detections.filter((d) => d.confidence >= confThreshold);
@@ -71,7 +74,7 @@ export function applyNMS(
  */
 function applyCrossClassNMS(
   detections: RawDetection[],
-  iouThreshold: number
+  iouThreshold: number,
 ): RawDetection[] {
   // Build a set of class IDs that belong to any confusion group
   const classToGroup = new Map<number, number>();
@@ -97,7 +100,10 @@ function applyCrossClassNMS(
 
       const groupJ = classToGroup.get(detections[j].classId);
       // Same confusion group but different class
-      if (groupJ === groupI && detections[j].classId !== detections[i].classId) {
+      if (
+        groupJ === groupI &&
+        detections[j].classId !== detections[i].classId
+      ) {
         const iou = calculateIoU(detections[i].box, detections[j].box);
         if (iou > iouThreshold) {
           suppressed.add(j);
