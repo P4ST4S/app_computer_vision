@@ -16,28 +16,39 @@ export async function preprocessImage(
   imageData: string | ImageBitmap
 ): Promise<ort.Tensor> {
   // Step 1: Decode base64 to ImageBitmap (if needed)
-  const bitmap =
+  const sourceBitmap =
     typeof imageData === 'string'
       ? await decodeBase64ToImageBitmap(imageData)
       : imageData;
+  let resizedBitmap: ImageBitmap | null = null;
 
-  // Step 2: Resize to 640x640 (YOLO input size)
-  const resized = await resizeImageBitmap(
-    bitmap,
-    INFERENCE_CONFIG.INPUT_SIZE,
-    INFERENCE_CONFIG.INPUT_SIZE
-  );
+  try {
+    // Step 2: Resize to 640x640 (YOLO input size)
+    resizedBitmap = await resizeImageBitmap(
+      sourceBitmap,
+      INFERENCE_CONFIG.INPUT_SIZE,
+      INFERENCE_CONFIG.INPUT_SIZE
+    );
 
-  // Step 3: Extract RGB pixels and convert to tensor
-  const tensorData = await bitmapToTensorData(resized);
+    // Step 3: Extract RGB pixels and convert to tensor
+    const tensorData = await bitmapToTensorData(resizedBitmap);
 
-  // Step 4: Create ONNX tensor
-  return new ort.Tensor('float32', tensorData, [
-    1,
-    3,
-    INFERENCE_CONFIG.INPUT_SIZE,
-    INFERENCE_CONFIG.INPUT_SIZE,
-  ]);
+    // Step 4: Create ONNX tensor
+    return new ort.Tensor('float32', tensorData, [
+      1,
+      3,
+      INFERENCE_CONFIG.INPUT_SIZE,
+      INFERENCE_CONFIG.INPUT_SIZE,
+    ]);
+  } finally {
+    // Release native bitmap memory eagerly on constrained mobile devices.
+    if (resizedBitmap) {
+      resizedBitmap.close();
+    }
+    if (typeof imageData === 'string') {
+      sourceBitmap.close();
+    }
+  }
 }
 
 /**

@@ -43,7 +43,7 @@ export interface InferenceResult {
 }
 
 /**
- * Single food detection with segmentation mask and nutrition
+ * Single food detection returned to the main thread (UI-safe payload)
  */
 export interface Detection {
   /** Class ID from YOLO model (0-31 for 32 food classes) */
@@ -54,12 +54,18 @@ export interface Detection {
   confidence: number;
   /** Bounding box in normalized coordinates */
   box: BoundingBox;
-  /** Segmentation mask (640x640 flat array of 0/1 values) */
-  mask: number[];
   /** Calculated nutrition information */
   nutrition: NutritionInfo;
   /** Food emoji icon */
   icon: string;
+}
+
+/**
+ * Internal worker detection (includes mask pixel count for nutrition physics)
+ */
+export interface DetectionWithMaskPixels extends Detection {
+  /** Number of active pixels in the binary segmentation mask */
+  maskPixelCount: number;
 }
 
 /**

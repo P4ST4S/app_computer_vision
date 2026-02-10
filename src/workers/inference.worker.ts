@@ -9,6 +9,7 @@ import type {
   WorkerRequest,
   WorkerResponse,
   InferenceResult,
+  Detection,
   RawDetection,
 } from "../lib/inference/types";
 import { preprocessImage } from "../lib/inference/preprocessing";
@@ -22,7 +23,7 @@ import { INFERENCE_CONFIG, APP_BASE_URL } from "../lib/constants";
 
 let session: ort.InferenceSession | null = null;
 let isInitializing = false;
-let initError: Error | null = null;
+const DEBUG_WORKER = false;
 
 // ============================================================================
 // Session Initialization
@@ -52,28 +53,33 @@ async function initializeSession(): Promise<void> {
     ort.env.wasm.wasmPaths =
       "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.1/dist/";
     ort.env.wasm.numThreads = 1; // Start with single thread for compatibility
-    ort.env.logLevel = "verbose"; // Enable verbose logging for debugging
+    ort.env.logLevel = DEBUG_WORKER ? "verbose" : "warning";
 
-    console.log("[Worker] ONNX Runtime environment configured");
-    console.log("[Worker] WASM paths:", ort.env.wasm.wasmPaths);
+    if (DEBUG_WORKER) {
+      console.log("[Worker] ONNX Runtime environment configured");
+      console.log("[Worker] WASM paths:", ort.env.wasm.wasmPaths);
+    }
 
     // Create inference session with more compatible settings
     // Use absolute URL for model in worker context
     // Use APP_BASE_URL if set (for production), otherwise use current origin
     const baseUrl = APP_BASE_URL || self.location.origin;
     const modelUrl = new URL(INFERENCE_CONFIG.MODEL_PATH, baseUrl).href;
-    console.log("[Worker] Base URL:", baseUrl);
-    console.log("[Worker] Loading model from:", modelUrl);
+    if (DEBUG_WORKER) {
+      console.log("[Worker] Base URL:", baseUrl);
+      console.log("[Worker] Loading model from:", modelUrl);
+    }
     session = await ort.InferenceSession.create(modelUrl, {
       executionProviders: ["wasm"], // WebAssembly backend
       graphOptimizationLevel: "basic", // Start with basic optimization
     });
 
-    console.log("[Worker] Session initialized successfully");
-    console.log("[Worker] Input names:", session.inputNames);
-    console.log("[Worker] Output names:", session.outputNames);
+    if (DEBUG_WORKER) {
+      console.log("[Worker] Session initialized successfully");
+      console.log("[Worker] Input names:", session.inputNames);
+      console.log("[Worker] Output names:", session.outputNames);
+    }
   } catch (error) {
-    initError = error as Error;
     console.error("[Worker] Session initialization failed:", error);
     console.error("[Worker] Error details:", {
       message: (error as Error).message,
@@ -140,21 +146,13 @@ async function runInference(
       throw new Error("Missing model outputs");
     }
 
-    // Debug: Check ONNX outputs
     const output0Data = output0.data as Float32Array;
-    const output1Data = output1.data as Float32Array;
-    console.log("[Worker] ONNX outputs:", {
-      output0Dims: [...output0.dims],
-      output1Dims: [...output1.dims],
-      output0Sample: Array.from(output0Data.slice(0, 5)),
-      output1Sample: Array.from(output1Data.slice(0, 5)),
-      output0HasNaN: Array.from(output0Data.slice(0, 1000)).some((v) =>
-        isNaN(v),
-      ),
-      output1HasNaN: Array.from(output1Data.slice(0, 1000)).some((v) =>
-        isNaN(v),
-      ),
-    });
+    if (DEBUG_WORKER) {
+      console.log("[Worker] ONNX output dims:", {
+        output0Dims: [...output0.dims],
+        output1Dims: [...output1.dims],
+      });
+    }
 
     // Step 3: Parse YOLO outputs to raw detections
     const rawDetections = parseYOLOOutput(
@@ -162,30 +160,34 @@ async function runInference(
       [...output0.dims], // Convert readonly array to mutable
     );
 
-    console.log(`[Worker] Parsed ${rawDetections.length} raw detections`);
-
-    // Debug: Check first detection's mask coefficients
-    if (rawDetections.length > 0) {
-      console.log("[Worker] First detection maskCoeffs:", {
-        length: rawDetections[0].maskCoeffs.length,
-        sample: Array.from(rawDetections[0].maskCoeffs.slice(0, 5)),
-        hasNaN: Array.from(rawDetections[0].maskCoeffs).some((v) => isNaN(v)),
-      });
+    if (DEBUG_WORKER) {
+      console.log(`[Worker] Parsed ${rawDetections.length} raw detections`);
     }
 
     // Step 4: Apply Non-Maximum Suppression
     const filteredDetections = applyNMS(rawDetections);
 
-    console.log(
-      `[Worker] After NMS: ${filteredDetections.length} detections remaining`,
-    );
+    if (DEBUG_WORKER) {
+      console.log(
+        `[Worker] After NMS: ${filteredDetections.length} detections remaining`,
+      );
+    }
 
-    // Step 5: Generate masks and calculate nutrition
-    const detections = await processDetections(
+    // Step 5: Generate detection metadata and calculate nutrition (without returning masks)
+    const workerDetections = await processDetections(
       filteredDetections,
       output1.data as Float32Array,
       [...output1.dims], // Convert readonly array to mutable
     );
+
+    const detections: Detection[] = workerDetections.map((d) => ({
+      classId: d.classId,
+      label: d.label,
+      confidence: d.confidence,
+      box: d.box,
+      nutrition: d.nutrition,
+      icon: d.icon,
+    }));
 
     // Step 6: Calculate total calories
     const totalCalories = detections.reduce(
@@ -195,9 +197,11 @@ async function runInference(
 
     const processingTime = performance.now() - startTime;
 
-    console.log(
-      `[Worker] Inference complete in ${processingTime.toFixed(0)}ms`,
-    );
+    if (DEBUG_WORKER) {
+      console.log(
+        `[Worker] Inference complete in ${processingTime.toFixed(0)}ms`,
+      );
+    }
 
     // Return result
     const result: InferenceResult = {
@@ -224,7 +228,7 @@ async function runInference(
  * @returns Array of raw detections
  */
 function parseYOLOOutput(data: Float32Array, dims: number[]): RawDetection[] {
-  const [batch, channels, numAnchors] = dims; // [1, 116, 8400]
+  const [, , numAnchors] = dims; // [1, 68, 8400]
 
   // YOLOv8-seg format for our custom model:
   // First 4 channels: bbox (x_center, y_center, width, height)

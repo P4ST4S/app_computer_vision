@@ -1,35 +1,45 @@
 /**
  * Post-Processing for YOLOv8 Segmentation
- * Generates binary masks from prototypes and calculates nutrition using physics-based algorithm
+ * Computes segmentation mask pixel counts and calculates nutrition using physics-based algorithm
  */
 
-import type { Detection, RawDetection, NutritionInfo, FoodInfo } from './types';
+import type {
+  Detection,
+  DetectionWithMaskPixels,
+  RawDetection,
+  NutritionInfo,
+  FoodInfo,
+} from './types';
 import { getFoodInfo } from './foodDatabase';
 import { INFERENCE_CONFIG } from '@/lib/constants';
 
 /**
- * Process raw detections to generate masks and calculate nutrition
+ * Process raw detections to generate mask pixel counts and calculate nutrition
  * @param detections - Filtered detections from NMS
  * @param maskProtos - Mask prototypes tensor from YOLO output1 [1, 32, 160, 160]
  * @param protoDims - Dimensions of mask prototypes tensor
- * @returns Complete detection results with masks and nutrition
+ * @returns Internal detection results with nutrition
  */
 export async function processDetections(
   detections: RawDetection[],
   maskProtos: Float32Array,
   protoDims: number[]
-): Promise<Detection[]> {
-  const results: Detection[] = [];
+): Promise<DetectionWithMaskPixels[]> {
+  const results: DetectionWithMaskPixels[] = [];
 
   for (const detection of detections) {
     // Get food information from database
     const foodInfo = getFoodInfo(detection.classId);
 
-    // Generate binary mask from prototypes
-    const mask = generateMask(detection.maskCoeffs, maskProtos, protoDims);
+    // Generate segmentation pixel count from prototypes
+    const maskPixelCount = countMaskPixels(
+      detection.maskCoeffs,
+      maskProtos,
+      protoDims
+    );
 
     // Calculate nutrition using physics-based algorithm
-    const nutrition = calculateNutrition(mask, foodInfo);
+    const nutrition = calculateNutrition(maskPixelCount, foodInfo);
 
     // Create complete detection result
     results.push({
@@ -37,7 +47,7 @@ export async function processDetections(
       label: foodInfo.name,
       confidence: detection.confidence,
       box: detection.box,
-      mask,
+      maskPixelCount,
       nutrition,
       icon: foodInfo.icon,
     });
@@ -47,39 +57,23 @@ export async function processDetections(
 }
 
 /**
- * Generate binary segmentation mask from YOLO mask prototypes
+ * Count active pixels in segmentation mask generated from YOLO mask prototypes
  * @param coeffs - Mask coefficients from detection (32 values)
  * @param protos - Mask prototypes [1, 32, 160, 160] flattened
  * @param dims - Tensor dimensions [1, 32, 160, 160]
- * @returns Binary mask (640x640 flat array of 0/1 values)
+ * @returns Number of active pixels in the resized binary mask
  */
-function generateMask(
+function countMaskPixels(
   coeffs: Float32Array,
   protos: Float32Array,
   dims: number[]
-): number[] {
-  const [_, numProtos, protoH, protoW] = dims; // [1, 32, 160, 160]
+): number {
+  const [, numProtos, protoH, protoW] = dims; // [1, 32, 160, 160]
   const outputSize = protoH * protoW; // 25,600 pixels
 
-  // Debug: Check input data
-  console.log('[Mask Gen] Input check:', {
-    dims,
-    numProtos,
-    protoH,
-    protoW,
-    outputSize,
-    coeffsLength: coeffs.length,
-    protosLength: protos.length,
-    coeffsSample: Array.from(coeffs.slice(0, 5)),
-    protosSample: Array.from(protos.slice(0, 5)),
-    coeffsHasNaN: Array.from(coeffs).some(v => isNaN(v)),
-    protosHasNaN: Array.from(protos).some(v => isNaN(v)),
-  });
-
-  // Matrix multiplication: (1x32) @ (32x25600) = (1x25600)
-  // Each prototype is weighted by its coefficient
+  // Matrix multiplication: (1x32) @ (32x25600) = (1x25600), sigmoid applied per point.
+  // We keep this intermediate at prototype resolution only.
   const mask = new Float32Array(outputSize);
-
   for (let i = 0; i < outputSize; i++) {
     let sum = 0;
 
@@ -92,14 +86,8 @@ function generateMask(
     mask[i] = 1 / (1 + Math.exp(-sum));
   }
 
-  // Debug: Check mask values before resize
-  const maskMin = Math.min(...mask);
-  const maskMax = Math.max(...mask);
-  const maskMean = mask.reduce((sum, val) => sum + val, 0) / mask.length;
-  console.log('[Mask Gen] Before resize:', { min: maskMin, max: maskMax, mean: maskMean });
-
-  // Resize from 160x160 to 640x640 and binarize
-  const binaryMask = resizeAndBinarizeMask(
+  // Resize from 160x160 to 640x640 and count active pixels without storing full mask.
+  return resizeAndCountMaskPixels(
     mask,
     protoH,
     protoW,
@@ -107,35 +95,29 @@ function generateMask(
     INFERENCE_CONFIG.INPUT_SIZE,
     INFERENCE_CONFIG.MASK_THRESHOLD
   );
-
-  // Debug: Check binary mask
-  const pixelCount = binaryMask.reduce((sum, val) => sum + val, 0);
-  console.log('[Mask Gen] After resize:', { length: binaryMask.length, pixelCount });
-
-  return binaryMask;
 }
 
 /**
- * Resize mask from source dimensions to target dimensions and binarize
+ * Resize mask from source dimensions to target dimensions and count active pixels
  * @param mask - Source mask (160x160 flattened)
  * @param srcH - Source height (160)
  * @param srcW - Source width (160)
  * @param dstH - Target height (640)
  * @param dstW - Target width (640)
  * @param threshold - Binarization threshold (0.5)
- * @returns Binary mask array (640x640 = 409,600 values of 0 or 1)
+ * @returns Number of pixels above threshold in resized mask
  */
-function resizeAndBinarizeMask(
+function resizeAndCountMaskPixels(
   mask: Float32Array,
   srcH: number,
   srcW: number,
   dstH: number,
   dstW: number,
   threshold: number
-): number[] {
-  const result = new Array(dstH * dstW);
+): number {
   const scaleX = srcW / dstW;
   const scaleY = srcH / dstH;
+  let activePixelCount = 0;
 
   // Nearest neighbor interpolation
   for (let y = 0; y < dstH; y++) {
@@ -144,19 +126,20 @@ function resizeAndBinarizeMask(
       const srcY = Math.floor(y * scaleY);
       const value = mask[srcY * srcW + srcX];
 
-      // Binarize: 1 if above threshold, 0 otherwise
-      result[y * dstW + x] = value >= threshold ? 1 : 0;
+      if (value >= threshold) {
+        activePixelCount++;
+      }
     }
   }
 
-  return result;
+  return activePixelCount;
 }
 
 /**
  * CRITICAL: Calculate nutrition using the exact NutriScan physics-based algorithm
  *
  * Algorithm steps:
- * 1. Count mask pixels (area in pixels)
+ * 1. Count mask pixels (area in pixels) from segmentation
  * 2. Convert pixel area to real-world area (cm²) using calibration ratio
  * 3. Calculate volume (cm³) using food-specific thickness
  * 4. Calculate weight (g) using food-specific density
@@ -164,25 +147,13 @@ function resizeAndBinarizeMask(
  *
  * Calibration: 640px = 30cm (pixel_ratio = 30/640 cm per pixel)
  *
- * @param mask - Binary mask (640x640 flat array)
+ * @param pixelCount - Number of active pixels in binary mask
  * @param foodInfo - Food metadata (density, thickness, nutrition per 100g)
  * @returns Calculated nutrition information
  */
-function calculateNutrition(mask: number[], foodInfo: FoodInfo): NutritionInfo {
-  // Step 1: Count mask pixels (area in pixels)
-  const pixelCount = mask.reduce((sum, val) => sum + val, 0);
-
-  console.log('[Nutrition Calc]', {
-    food: foodInfo.name,
-    maskLength: mask.length,
-    pixelCount,
-    density: foodInfo.density,
-    thickness: foodInfo.defaultThicknessCm,
-  });
-
+function calculateNutrition(pixelCount: number, foodInfo: FoodInfo): NutritionInfo {
   // If no pixels, return zero nutrition
   if (pixelCount === 0) {
-    console.warn('[Nutrition Calc] WARNING: Pixel count is 0 for', foodInfo.name);
     return {
       weightGrams: 0,
       calories: 0,
@@ -246,41 +217,4 @@ export function aggregateNutrition(detections: Detection[]): NutritionInfo {
       fiber: 0,
     }
   );
-}
-
-/**
- * Utility: Count non-zero pixels in mask
- * @param mask - Binary mask array
- * @returns Number of non-zero pixels
- */
-export function countMaskPixels(mask: number[]): number {
-  return mask.reduce((sum, val) => sum + val, 0);
-}
-
-/**
- * Utility: Log nutrition calculation details (for debugging)
- * @param mask - Binary mask
- * @param foodInfo - Food metadata
- * @param nutrition - Calculated nutrition
- */
-export function logNutritionCalculation(
-  mask: number[],
-  foodInfo: FoodInfo,
-  nutrition: NutritionInfo
-): void {
-  const pixelCount = countMaskPixels(mask);
-  const pixelRatio = INFERENCE_CONFIG.PIXEL_RATIO;
-  const areaRealCm2 = pixelCount * (pixelRatio ** 2);
-  const volumeCm3 = areaRealCm2 * foodInfo.defaultThicknessCm;
-
-  console.log('[Nutrition Calculation]', {
-    food: foodInfo.name,
-    pixelCount,
-    areaRealCm2: areaRealCm2.toFixed(2),
-    volumeCm3: volumeCm3.toFixed(2),
-    density: foodInfo.density,
-    thickness: foodInfo.defaultThicknessCm,
-    weightGrams: nutrition.weightGrams.toFixed(1),
-    calories: nutrition.calories.toFixed(0),
-  });
 }
