@@ -21,8 +21,27 @@ export type WorkerRequest =
 export type WorkerResponse =
   | { id: string; type: "INIT_SUCCESS" }
   | { id: string; type: "INFER_SUCCESS"; payload: InferenceResult }
+  | { id: string; type: "PROGRESS"; payload: WorkerProgressPayload }
   | { id: string; type: "TERMINATE_SUCCESS" }
   | { id: string; type: "ERROR"; payload: { message: string } };
+
+/**
+ * Progress payload emitted by worker during inference pipeline
+ */
+export interface WorkerProgressPayload {
+  stage:
+    | "infer_received"
+    | "session_ready"
+    | "preprocess_done"
+    | "onnx_run_done"
+    | "parse_done"
+    | "nms_done"
+    | "postprocess_done"
+    | "result_ready";
+  tMs?: number;
+  detections?: number;
+  extra?: Record<string, unknown>;
+}
 
 // ============================================================================
 // Inference Result Types

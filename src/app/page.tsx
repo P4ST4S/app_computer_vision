@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import AppHeader from "@/components/AppHeader";
 import CameraScanner from "@/components/CameraScanner";
 import ImageUploader from "@/components/ImageUploader";
@@ -10,6 +10,7 @@ import { getRandomNutrition, type NutritionData } from "@/lib/mockNutrition";
 import { MAX_HISTORY_ITEMS } from "@/lib/constants";
 import { useInference } from "@/hooks/useInference";
 import { Camera, Upload } from "lucide-react";
+import { logDiagnostic } from "@/lib/diagnostics";
 
 export default function Home() {
   const [isScanning, setIsScanning] = useState(false);
@@ -20,14 +21,74 @@ export default function Home() {
   // Initialize inference worker
   const { isReady, runInference } = useInference();
 
+  useEffect(() => {
+    const onError = (event: ErrorEvent) => {
+      logDiagnostic({
+        event: "window_error",
+        level: "error",
+        details: {
+          message: event.message,
+          source: event.filename,
+          line: event.lineno,
+          column: event.colno,
+          stack: event.error?.stack,
+        },
+      });
+    };
+
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason as { message?: string; stack?: string } | undefined;
+      logDiagnostic({
+        event: "window_unhandled_rejection",
+        level: "error",
+        details: {
+          message: reason?.message ?? String(event.reason),
+          stack: reason?.stack,
+        },
+      });
+    };
+
+    const onVisibilityChange = () => {
+      logDiagnostic({
+        event: "document_visibility_changed",
+        details: { visibilityState: document.visibilityState },
+      });
+    };
+
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    logDiagnostic({
+      event: "home_page_mounted",
+      details: {
+        userAgent: navigator.userAgent,
+      },
+    });
+
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
   const handleScan = useCallback(async (imageData: string) => {
     // Only proceed if worker is ready
     if (!isReady) {
       console.warn('[App] Inference engine not ready yet');
+      logDiagnostic({
+        event: "scan_skipped_worker_not_ready",
+        level: "warn",
+      });
       return;
     }
 
     setIsScanning(true);
+    logDiagnostic({
+      event: "scan_started",
+      details: { imageLength: imageData.length, activeTab },
+    });
 
     try {
       // Run real AI inference
@@ -79,8 +140,22 @@ export default function Home() {
 
       setCurrentResults(results);
       setHistory((prev) => [...results, ...prev].slice(0, MAX_HISTORY_ITEMS));
+      logDiagnostic({
+        event: "scan_success",
+        details: {
+          items: results.length,
+          historySize: Math.min(history.length + results.length, MAX_HISTORY_ITEMS),
+        },
+      });
     } catch (error) {
       console.error('[App] Inference failed:', error);
+      logDiagnostic({
+        event: "scan_failed_using_fallback",
+        level: "error",
+        details: {
+          message: (error as Error)?.message ?? "unknown_scan_error",
+        },
+      });
 
       // Fallback to mock data on error
       const fallbackResult = getRandomNutrition();
@@ -88,8 +163,9 @@ export default function Home() {
       setHistory((prev) => [fallbackResult, ...prev].slice(0, MAX_HISTORY_ITEMS));
     } finally {
       setIsScanning(false);
+      logDiagnostic({ event: "scan_finished" });
     }
-  }, [isReady, runInference]);
+  }, [activeTab, history.length, isReady, runInference]);
 
   const handleRemoveItem = useCallback((index: number) => {
     setCurrentResults((prev) => {

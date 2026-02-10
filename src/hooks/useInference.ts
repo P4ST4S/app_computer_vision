@@ -8,6 +8,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { InferenceWorkerClient } from '@/lib/workerClient';
 import type { InferenceResult } from '@/lib/inference/types';
+import { logDiagnostic } from '@/lib/diagnostics';
+
+const LAST_INFERENCE_STAGE_KEY = 'nutriscan_last_inference_stage';
 
 interface UseInferenceReturn {
   /** Whether the worker is ready for inference */
@@ -35,6 +38,18 @@ export function useInference(): UseInferenceReturn {
   const [error, setError] = useState<string | null>(null);
   const initAttemptedRef = useRef(false);
 
+  useEffect(() => {
+    const lastStage = localStorage.getItem(LAST_INFERENCE_STAGE_KEY);
+    if (!lastStage) return;
+
+    logDiagnostic({
+      event: 'previous_session_incomplete_inference',
+      level: 'warn',
+      details: { lastStage },
+    });
+    localStorage.removeItem(LAST_INFERENCE_STAGE_KEY);
+  }, []);
+
   // Initialize worker on mount
   useEffect(() => {
     // Prevent double initialization in strict mode
@@ -44,20 +59,39 @@ export function useInference(): UseInferenceReturn {
     initAttemptedRef.current = true;
 
     console.log('[useInference] Initializing worker...');
+    logDiagnostic({ event: 'inference_worker_init_start' });
 
     // Create worker client
-    workerRef.current = new InferenceWorkerClient();
+    workerRef.current = new InferenceWorkerClient(({ id, payload }) => {
+      localStorage.setItem(LAST_INFERENCE_STAGE_KEY, payload.stage);
+      logDiagnostic({
+        event: 'inference_worker_progress',
+        details: {
+          requestId: id,
+          stage: payload.stage,
+          tMs: payload.tMs,
+          detections: payload.detections,
+          extra: payload.extra,
+        },
+      });
+    });
 
     // Initialize the model
     workerRef.current
       .initialize()
       .then(() => {
         console.log('[useInference] Worker ready');
+        logDiagnostic({ event: 'inference_worker_init_success' });
         setIsReady(true);
         setError(null);
       })
       .catch((err) => {
         console.error('[useInference] Initialization failed:', err);
+        logDiagnostic({
+          event: 'inference_worker_init_failed',
+          level: 'error',
+          details: { message: err?.message ?? 'unknown_error' },
+        });
         setError(err.message || 'Failed to initialize inference engine');
         setIsReady(false);
       });
@@ -65,6 +99,7 @@ export function useInference(): UseInferenceReturn {
     // Cleanup on unmount
     return () => {
       console.log('[useInference] Cleaning up worker');
+      logDiagnostic({ event: 'inference_worker_cleanup' });
       if (workerRef.current) {
         workerRef.current.terminate();
         workerRef.current = null;
@@ -84,18 +119,46 @@ export function useInference(): UseInferenceReturn {
 
       setIsProcessing(true);
       setError(null);
+      const startedAt = performance.now();
+      localStorage.setItem(LAST_INFERENCE_STAGE_KEY, 'run_inference_started');
+      logDiagnostic({
+        event: 'inference_run_start',
+        details: {
+          imageLength: imageData.length,
+          pendingRequests: workerRef.current.getPendingCount(),
+        },
+      });
 
       try {
         const result = await workerRef.current.infer(imageData);
+        localStorage.removeItem(LAST_INFERENCE_STAGE_KEY);
         console.log('[useInference] Inference complete:', {
           detections: result.detections.length,
           totalCalories: result.totalCalories.toFixed(0),
           processingTime: result.processingTime.toFixed(0) + 'ms',
         });
+        logDiagnostic({
+          event: 'inference_run_success',
+          details: {
+            detections: result.detections.length,
+            totalCalories: result.totalCalories,
+            workerProcessingTimeMs: result.processingTime,
+            totalAwaitTimeMs: Math.round(performance.now() - startedAt),
+          },
+        });
         return result;
       } catch (err) {
         const errorMessage = (err as Error).message;
         console.error('[useInference] Inference failed:', errorMessage);
+        logDiagnostic({
+          event: 'inference_run_failed',
+          level: 'error',
+          details: {
+            message: errorMessage,
+            pendingRequests: workerRef.current.getPendingCount(),
+            lastStage: localStorage.getItem(LAST_INFERENCE_STAGE_KEY),
+          },
+        });
         setError(errorMessage);
         throw err;
       } finally {
@@ -110,6 +173,7 @@ export function useInference(): UseInferenceReturn {
    */
   const reinitialize = useCallback(async (): Promise<void> => {
     console.log('[useInference] Reinitializing worker...');
+    logDiagnostic({ event: 'inference_worker_reinitialize_start' });
 
     // Terminate existing worker
     if (workerRef.current) {
@@ -128,9 +192,15 @@ export function useInference(): UseInferenceReturn {
       await workerRef.current.initialize();
       setIsReady(true);
       console.log('[useInference] Worker reinitialized successfully');
+      logDiagnostic({ event: 'inference_worker_reinitialize_success' });
     } catch (err) {
       const errorMessage = (err as Error).message;
       console.error('[useInference] Reinitialization failed:', errorMessage);
+      logDiagnostic({
+        event: 'inference_worker_reinitialize_failed',
+        level: 'error',
+        details: { message: errorMessage },
+      });
       setError(errorMessage);
       throw err;
     }

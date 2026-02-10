@@ -11,6 +11,7 @@ import type {
   InferenceResult,
   Detection,
   RawDetection,
+  WorkerProgressPayload,
 } from "../lib/inference/types";
 import { preprocessImage } from "../lib/inference/preprocessing";
 import { applyNMS } from "../lib/inference/nms";
@@ -24,6 +25,18 @@ import { INFERENCE_CONFIG, APP_BASE_URL } from "../lib/constants";
 let session: ort.InferenceSession | null = null;
 let isInitializing = false;
 const DEBUG_WORKER = false;
+
+function postProgress(
+  id: string,
+  payload: WorkerProgressPayload,
+): void {
+  const message: WorkerResponse = {
+    id,
+    type: "PROGRESS",
+    payload,
+  };
+  self.postMessage(message);
+}
 
 // ============================================================================
 // Session Initialization
@@ -116,6 +129,7 @@ async function waitForInitialization(): Promise<void> {
  */
 async function runInference(
   imageData: string | ImageBitmap,
+  requestId: string,
 ): Promise<InferenceResult> {
   const startTime = performance.now();
 
@@ -128,12 +142,16 @@ async function runInference(
     throw new Error("Failed to initialize ONNX session");
   }
 
+  postProgress(requestId, { stage: "session_ready", tMs: performance.now() - startTime });
+
   try {
     // Step 1: Preprocess image to tensor
     const inputTensor = await preprocessImage(imageData);
+    postProgress(requestId, { stage: "preprocess_done", tMs: performance.now() - startTime });
 
     // Step 2: Run ONNX inference
     const outputs = await session.run({ images: inputTensor });
+    postProgress(requestId, { stage: "onnx_run_done", tMs: performance.now() - startTime });
 
     // YOLOv8-seg outputs (custom 32-class model):
     // output0: [1, 68, 8400] - Detection boxes (4) + class scores (32) + mask coefficients (32)
@@ -159,6 +177,11 @@ async function runInference(
       output0Data,
       [...output0.dims], // Convert readonly array to mutable
     );
+    postProgress(requestId, {
+      stage: "parse_done",
+      tMs: performance.now() - startTime,
+      detections: rawDetections.length,
+    });
 
     if (DEBUG_WORKER) {
       console.log(`[Worker] Parsed ${rawDetections.length} raw detections`);
@@ -166,6 +189,11 @@ async function runInference(
 
     // Step 4: Apply Non-Maximum Suppression
     const filteredDetections = applyNMS(rawDetections);
+    postProgress(requestId, {
+      stage: "nms_done",
+      tMs: performance.now() - startTime,
+      detections: filteredDetections.length,
+    });
 
     if (DEBUG_WORKER) {
       console.log(
@@ -179,6 +207,11 @@ async function runInference(
       output1.data as Float32Array,
       [...output1.dims], // Convert readonly array to mutable
     );
+    postProgress(requestId, {
+      stage: "postprocess_done",
+      tMs: performance.now() - startTime,
+      detections: workerDetections.length,
+    });
 
     const detections: Detection[] = workerDetections.map((d) => ({
       classId: d.classId,
@@ -213,6 +246,12 @@ async function runInference(
           ? "Aucun aliment détecté. Essayez de vous rapprocher."
           : undefined,
     };
+
+    postProgress(requestId, {
+      stage: "result_ready",
+      tMs: performance.now() - startTime,
+      detections: detections.length,
+    });
 
     return result;
   } catch (error) {
@@ -321,7 +360,8 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         if (!request.payload || !request.payload.imageData) {
           throw new Error("Missing imageData in INFER request");
         }
-        const result = await runInference(request.payload.imageData);
+        postProgress(id, { stage: "infer_received", tMs: 0 });
+        const result = await runInference(request.payload.imageData, id);
         const inferResponse: WorkerResponse = {
           id,
           type: "INFER_SUCCESS",

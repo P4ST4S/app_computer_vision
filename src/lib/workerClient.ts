@@ -3,7 +3,8 @@
  * Provides a clean Promise-based API for communicating with the inference worker
  */
 
-import type { InferenceResult } from './inference/types';
+import type { InferenceResult, WorkerProgressPayload } from './inference/types';
+import { logDiagnostic } from './diagnostics';
 
 /**
  * Client for communicating with the inference Web Worker
@@ -12,6 +13,7 @@ import type { InferenceResult } from './inference/types';
 export class InferenceWorkerClient {
   private worker: Worker | null = null;
   private messageId = 0;
+  private onProgress?: (message: { id: string; payload: WorkerProgressPayload }) => void;
   private pendingRequests = new Map<
     string,
     {
@@ -24,7 +26,8 @@ export class InferenceWorkerClient {
   /**
    * Create a new worker client and initialize the worker
    */
-  constructor() {
+  constructor(onProgress?: (message: { id: string; payload: WorkerProgressPayload }) => void) {
+    this.onProgress = onProgress;
     this.initWorker();
   }
 
@@ -42,6 +45,11 @@ export class InferenceWorkerClient {
       // Handle messages from worker
       this.worker.onmessage = (event: MessageEvent) => {
         const { id, type, payload } = event.data;
+
+        if (type === 'PROGRESS') {
+          this.onProgress?.({ id, payload });
+          return;
+        }
 
         const pending = this.pendingRequests.get(id);
         if (!pending) {
@@ -68,6 +76,16 @@ export class InferenceWorkerClient {
       // Handle worker errors
       this.worker.onerror = (error) => {
         console.error('[WorkerClient] Worker error:', error);
+        logDiagnostic({
+          event: 'worker_runtime_error',
+          level: 'error',
+          details: {
+            message: error.message,
+            filename: error.filename,
+            line: error.lineno,
+            column: error.colno,
+          },
+        });
 
         // Reject all pending requests
         this.pendingRequests.forEach((pending) => {
@@ -108,6 +126,15 @@ export class InferenceWorkerClient {
       // Set up timeout
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
+        logDiagnostic({
+          event: 'worker_request_timeout',
+          level: 'error',
+          details: {
+            requestId: id,
+            type,
+            timeoutMs,
+          },
+        });
         reject(new Error(`Worker request timeout after ${timeoutMs}ms`));
       }, timeoutMs);
 
@@ -116,6 +143,14 @@ export class InferenceWorkerClient {
 
       // Send message to worker
       this.worker.postMessage({ id, type, payload });
+      logDiagnostic({
+        event: 'worker_request_sent',
+        details: {
+          requestId: id,
+          type,
+          pendingRequests: this.pendingRequests.size,
+        },
+      });
     });
   }
 

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { CAMERA_CONFIG } from "@/lib/constants";
+import { logDiagnostic } from "@/lib/diagnostics";
 
 export function useCamera() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -12,6 +13,7 @@ export function useCamera() {
   const startCamera = useCallback(async () => {
     try {
       setError(null);
+      logDiagnostic({ event: "camera_start_requested" });
 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("L'API getUserMedia n'est pas supportée par ce navigateur");
@@ -23,8 +25,12 @@ export function useCamera() {
         stream = await navigator.mediaDevices.getUserMedia({
           video: CAMERA_CONFIG,
         });
-      } catch (err) {
+      } catch {
         // Fallback: config simple si la config avancée échoue
+        logDiagnostic({
+          event: "camera_start_fallback_to_default_constraints",
+          level: "warn",
+        });
         stream = await navigator.mediaDevices.getUserMedia({
           video: true,
         });
@@ -33,6 +39,12 @@ export function useCamera() {
       streamRef.current = stream;
       // Set active first so the <video> element mounts in the DOM
       setIsActive(true);
+      logDiagnostic({
+        event: "camera_start_success",
+        details: {
+          trackCount: stream.getTracks().length,
+        },
+      });
     } catch (err: any) {
       let errorMessage = "Impossible d'accéder à la caméra.";
 
@@ -46,6 +58,15 @@ export function useCamera() {
 
       setError(errorMessage);
       setIsActive(false);
+      logDiagnostic({
+        event: "camera_start_failed",
+        level: "error",
+        details: {
+          message: err?.message ?? "unknown_camera_error",
+          name: err?.name ?? "unknown_error_name",
+          mappedError: errorMessage,
+        },
+      });
     }
   }, []);
 
@@ -58,6 +79,7 @@ export function useCamera() {
       videoRef.current.srcObject = null;
     }
     setIsActive(false);
+    logDiagnostic({ event: "camera_stopped" });
   }, []);
 
   const captureFrame = useCallback((): string | null => {
@@ -68,6 +90,13 @@ export function useCamera() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(videoRef.current, 0, 0);
+    logDiagnostic({
+      event: "camera_frame_captured",
+      details: {
+        width: canvas.width,
+        height: canvas.height,
+      },
+    });
     return canvas.toDataURL("image/jpeg", 0.8);
   }, []);
 
@@ -77,6 +106,11 @@ export function useCamera() {
       videoRef.current.srcObject = streamRef.current;
       videoRef.current.play().catch((err) => {
         console.error("Erreur play():", err);
+        logDiagnostic({
+          event: "camera_video_play_failed",
+          level: "error",
+          details: { message: err?.message ?? "unknown_play_error" },
+        });
       });
     }
   }, [isActive]);
