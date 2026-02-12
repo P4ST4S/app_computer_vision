@@ -11,7 +11,8 @@ interface CameraScannerProps {
 }
 
 const CameraScanner = ({ onScan, isScanning }: CameraScannerProps) => {
-  const { videoRef, isActive, error, startCamera, stopCamera, captureFrame } = useCamera();
+  const { videoRef, isActive, error, startCamera, stopCamera, captureFrame } =
+    useCamera();
   const [showOverlay, setShowOverlay] = useState(false);
 
   const handleScan = () => {
@@ -26,7 +27,10 @@ const CameraScanner = ({ onScan, isScanning }: CameraScannerProps) => {
   return (
     <div className="relative mx-auto w-full max-w-md px-5">
       {/* Camera viewport */}
-      <div className="relative overflow-hidden rounded-3xl border-2 border-[hsl(var(--color-border))] bg-[hsl(var(--color-muted))]" style={{ aspectRatio: "3/4" }}>
+      <div
+        className="relative overflow-hidden rounded-3xl border-2 border-[hsl(var(--color-border))] bg-[hsl(var(--color-muted))]"
+        style={{ aspectRatio: "3/4" }}
+      >
         {isActive ? (
           <>
             <video
@@ -35,7 +39,6 @@ const CameraScanner = ({ onScan, isScanning }: CameraScannerProps) => {
               playsInline
               muted
               className="h-full w-full object-cover"
-              style={{ transform: 'scaleX(-1)' }}
             />
             {/* Scanner overlay */}
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
