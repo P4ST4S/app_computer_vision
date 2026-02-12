@@ -1,97 +1,107 @@
-# 🍎 NutriScan - Scanner Nutritionnel
+# NutriScan
 
-Application Next.js pour scanner des aliments et afficher leurs informations nutritionnelles.
+Application Next.js qui détecte des aliments sur image/caméra (YOLOv8 segmentation ONNX) et estime calories + macros.
 
-## 🚀 Technologies
+## Stack
 
-- **Next.js 16** avec App Router
-- **React 19** avec React Compiler
-- **TypeScript**
-- **Tailwind CSS v4**
-- **Lucide React** (icônes)
-- **pnpm** (gestionnaire de packages)
+- Next.js 16 (App Router)
+- React 19 + TypeScript
+- Tailwind CSS v4
+- onnxruntime-web (inférence dans un Web Worker)
 
-## 📦 Installation
+## Installation
 
 ```bash
+npm install
+# ou
 pnpm install
 ```
 
-## 🛠️ Développement
+## Scripts
 
 ```bash
-pnpm dev
+npm run dev
+npm run build
+npm run start
+npm run lint
+npm run type-check
 ```
 
-Ouvrez [http://localhost:3000](http://localhost:3000) dans votre navigateur.
+## Fonctionnalités
 
-## 🏗️ Build
+- Scan via caméra
+- Upload d'image
+- Détection multi-aliments avec segmentation
+- Estimation nutritionnelle par portion calibrée
+- Historique local des scans
+- Fallback mock si l'inférence échoue
 
-```bash
-pnpm build
-pnpm start
+## Pipeline d'inférence
+
+1. `src/hooks/useInference.ts` initialise le worker.
+2. `src/workers/inference.worker.ts` charge `public/models/best.onnx` via ONNX Runtime.
+3. Prétraitement image dans `src/lib/inference/preprocessing.ts` vers tensor `1x3x640x640`.
+4. Parsing YOLO + NMS dans `src/workers/inference.worker.ts` et `src/lib/inference/nms.ts`.
+5. Génération masque + nutrition dans `src/lib/inference/postprocessing.ts`.
+
+## Estimation du poids (calibrée)
+
+La formule actuelle ne repose plus sur densité/épaisseur physiques.
+
+```ts
+totalPixels = 640 * 640
+maskRatioRaw = pixelCount / totalPixels
+maskRatioCalibrated = maskRatioRaw * MASK_RATIO_CALIBRATION
+scaleFactor = maskRatioCalibrated / expectedMaskRatio
+weightGrams = min(defaultPortionWeightG * scaleFactor, maxWeightG)
 ```
 
-## 📁 Structure du projet
+Puis calories/macros sont calculées avec les valeurs `per100g`.
 
-```
+Les paramètres alimentaires sont dans `src/lib/inference/foodDatabase.ts`:
+- `defaultPortionWeightG`
+- `expectedMaskRatio`
+- `maxWeightG`
+
+Le facteur global `MASK_RATIO_CALIBRATION` est défini dans `src/lib/constants.ts`.
+
+## Structure
+
+```text
 src/
-├── app/                      # App Router Next.js
-│   ├── layout.tsx           # Layout principal
-│   ├── page.tsx             # Page d'accueil
-│   └── globals.css          # Styles globaux
-├── components/              # Composants React
-│   ├── ui/                  # Composants UI réutilisables
-│   │   ├── button.tsx
-│   │   └── card.tsx
-│   ├── AppHeader.tsx        # En-tête de l'application
-│   ├── CameraScanner.tsx    # Scanner caméra
-│   ├── NutrientBar.tsx      # Barre de nutriment
-│   ├── NutritionResult.tsx  # Résultat nutritionnel
-│   └── ScanHistory.tsx      # Historique des scans
-├── hooks/                   # Hooks personnalisés
-│   └── useCamera.ts         # Hook pour la gestion caméra
-└── lib/                     # Utilitaires
-    ├── mockNutrition.ts     # Données simulées
-    └── utils.ts             # Fonctions utilitaires
+├── app/
+├── components/
+├── hooks/
+│   ├── useCamera.ts
+│   └── useInference.ts
+├── lib/
+│   ├── inference/
+│   │   ├── foodDatabase.ts
+│   │   ├── nms.ts
+│   │   ├── postprocessing.ts
+│   │   ├── preprocessing.ts
+│   │   └── types.ts
+│   ├── constants.ts
+│   ├── mockNutrition.ts
+│   └── workerClient.ts
+└── workers/
+    └── inference.worker.ts
 ```
 
-## 🎨 Fonctionnalités
+## Troubleshooting
 
-- ✅ Scanner d'aliments via caméra
-- ✅ Affichage des informations nutritionnelles
-- ✅ Historique des scans
-- ✅ Design responsive
-- ✅ Mode sombre/clair
-- ✅ Animations fluides
-- ⚠️ Données simulées (API à connecter)
+- Poids bloqués à `500g`:
+  - redémarrer `npm run dev`
+  - hard refresh navigateur (`Cmd+Shift+R`)
+  - vérifier les logs:
+    - `[Worker] Box stats`
+    - `[Postprocess] Mask stats`
+    - `[Nutrition] Weight calculation`
+- Modèle introuvable:
+  - vérifier la présence de `public/models/best.onnx`
+- Warning ONNX `Unknown CPU vendor`:
+  - attendu sur certaines machines, non bloquant
 
-## 🔧 Configuration
+## Permissions
 
-### Polices
-- **Inter** - Police principale
-- **Space Grotesk** - Titres
-
-### Couleurs personnalisées
-- Protéines : Bleu (`--nutrient-protein`)
-- Glucides : Orange (`--nutrient-carbs`)
-- Lipides : Rouge (`--nutrient-fat`)
-- Fibres : Vert (`--nutrient-fiber`)
-
-## 📝 Notes
-
-- Les données nutritionnelles sont actuellement simulées
-- L'API de reconnaissance d'images doit être intégrée pour un scan réel
-- Le React Compiler est activé pour optimiser les performances
-
-## 🔒 Permissions
-
-L'application nécessite l'accès à la caméra pour scanner les aliments.
-
-## 📚 Learn More
-
-Pour en savoir plus sur Next.js :
-
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Learn Next.js](https://nextjs.org/learn)
-
+L'application nécessite l'accès caméra pour le mode scan.
