@@ -9,7 +9,7 @@ export const MAX_HISTORY_ITEMS = 10;
 
 // Camera configuration
 export const CAMERA_CONFIG = {
-  facingMode: "user", // Utilise la caméra frontale (pour ordinateur/smartphone)
+  facingMode: "environment", // Utilise la caméra arrière (pour ordinateur/smartphone)
   width: { ideal: 1280 },
   height: { ideal: 720 },
 } as const;
@@ -32,13 +32,14 @@ export const NUTRIENT_LIMITS = {
 // App URL configuration (for deployment)
 // Leave empty to auto-detect (works for both dev and production)
 // Or set via NEXT_PUBLIC_APP_URL env variable: 'https://your-domain.com'
-export const APP_BASE_URL = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_APP_URL
-  ? process.env.NEXT_PUBLIC_APP_URL
-  : '';
+export const APP_BASE_URL =
+  typeof process !== "undefined" && process.env?.NEXT_PUBLIC_APP_URL
+    ? process.env.NEXT_PUBLIC_APP_URL
+    : "";
 
 // Inference configuration
 export const INFERENCE_CONFIG = {
-  MODEL_PATH: '/models/best.onnx',
+  MODEL_PATH: "/models/best.onnx",
   INPUT_SIZE: 640,
   CONFIDENCE_THRESHOLD: 0.25,
   IOU_THRESHOLD: 0.45,
