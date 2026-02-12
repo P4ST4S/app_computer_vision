@@ -107,10 +107,12 @@ export interface FoodInfo {
   id: number;
   /** Food name in French */
   name: string;
-  /** Density in g/cm³ (used for weight calculation) */
-  density: number;
-  /** Default thickness in cm (volume estimation) */
-  defaultThicknessCm: number;
+  /** Poids moyen d'une portion typique (g) */
+  defaultPortionWeightG: number;
+  /** Fraction de l'image 640x640 occupée par une portion typique */
+  expectedMaskRatio: number;
+  /** Plafond de poids pour éviter les valeurs aberrantes */
+  maxWeightG: number;
   /** Calories per 100g */
   caloriesPer100g: number;
   /** Protein per 100g */

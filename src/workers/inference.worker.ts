@@ -163,6 +163,7 @@ async function runInference(
     );
 
     console.log(`[Worker] Parsed ${rawDetections.length} raw detections`);
+    logDetectionBoxStats(rawDetections, "raw");
 
     // Debug: Check first detection's mask coefficients
     if (rawDetections.length > 0) {
@@ -179,6 +180,7 @@ async function runInference(
     console.log(
       `[Worker] After NMS: ${filteredDetections.length} detections remaining`,
     );
+    logDetectionBoxStats(filteredDetections, "after_nms");
 
     // Step 5: Generate masks and calculate nutrition
     const detections = await processDetections(
@@ -236,6 +238,7 @@ function parseYOLOOutput(data: Float32Array, dims: number[]): RawDetection[] {
   const numMaskCoeffs = 32;
 
   const detections: RawDetection[] = [];
+  let invalidBoxCount = 0;
 
   // Iterate over all 8400 anchor points
   for (let i = 0; i < numAnchors; i++) {
@@ -280,6 +283,19 @@ function parseYOLOOutput(data: Float32Array, dims: number[]): RawDetection[] {
       height: h / INFERENCE_CONFIG.INPUT_SIZE,
     };
 
+    if (
+      !Number.isFinite(box.x) ||
+      !Number.isFinite(box.y) ||
+      !Number.isFinite(box.width) ||
+      !Number.isFinite(box.height) ||
+      box.width <= 0 ||
+      box.height <= 0 ||
+      box.width > 2 ||
+      box.height > 2
+    ) {
+      invalidBoxCount++;
+    }
+
     // Add detection
     detections.push({
       classId: maxClassId,
@@ -289,7 +305,48 @@ function parseYOLOOutput(data: Float32Array, dims: number[]): RawDetection[] {
     });
   }
 
+  if (invalidBoxCount > 0) {
+    console.warn("[Worker] Suspicious boxes detected during parse", {
+      invalidBoxCount,
+      totalDetections: detections.length,
+    });
+  }
+
   return detections;
+}
+
+function logDetectionBoxStats(
+  detections: RawDetection[],
+  stage: "raw" | "after_nms",
+): void {
+  if (detections.length === 0) {
+    return;
+  }
+
+  const areaRatios = detections.map((d) => d.box.width * d.box.height);
+  const minArea = Math.min(...areaRatios);
+  const maxArea = Math.max(...areaRatios);
+  const meanArea =
+    areaRatios.reduce((sum, a) => sum + a, 0) / areaRatios.length;
+  const largeBoxes = areaRatios.filter((a) => a > 0.6).length;
+
+  console.log("[Worker] Box stats", {
+    stage,
+    count: detections.length,
+    minAreaRatio: Number(minArea.toFixed(4)),
+    maxAreaRatio: Number(maxArea.toFixed(4)),
+    meanAreaRatio: Number(meanArea.toFixed(4)),
+    largeBoxes,
+    sample: detections.slice(0, 5).map((d) => ({
+      classId: d.classId,
+      confidence: Number(d.confidence.toFixed(3)),
+      x: Number(d.box.x.toFixed(3)),
+      y: Number(d.box.y.toFixed(3)),
+      width: Number(d.box.width.toFixed(3)),
+      height: Number(d.box.height.toFixed(3)),
+      areaRatio: Number((d.box.width * d.box.height).toFixed(4)),
+    })),
+  });
 }
 
 // ============================================================================

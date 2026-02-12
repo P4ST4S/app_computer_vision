@@ -1,11 +1,17 @@
 /**
  * Post-Processing for YOLOv8 Segmentation
- * Generates binary masks from prototypes and calculates nutrition using physics-based algorithm
+ * Generates binary masks from prototypes and calculates nutrition using calibrated portion scaling
  */
 
-import type { Detection, RawDetection, NutritionInfo, FoodInfo } from './types';
-import { getFoodInfo } from './foodDatabase';
-import { INFERENCE_CONFIG } from '@/lib/constants';
+import type {
+  Detection,
+  RawDetection,
+  NutritionInfo,
+  FoodInfo,
+  BoundingBox,
+} from "./types";
+import { getFoodInfo } from "./foodDatabase";
+import { INFERENCE_CONFIG } from "@/lib/constants";
 
 /**
  * Process raw detections to generate masks and calculate nutrition
@@ -17,7 +23,7 @@ import { INFERENCE_CONFIG } from '@/lib/constants';
 export async function processDetections(
   detections: RawDetection[],
   maskProtos: Float32Array,
-  protoDims: number[]
+  protoDims: number[],
 ): Promise<Detection[]> {
   const results: Detection[] = [];
 
@@ -26,9 +32,36 @@ export async function processDetections(
     const foodInfo = getFoodInfo(detection.classId);
 
     // Generate binary mask from prototypes
-    const mask = generateMask(detection.maskCoeffs, maskProtos, protoDims);
+    const rawMask = generateMask(detection.maskCoeffs, maskProtos, protoDims);
+    const mask = cropMaskToBoundingBox(
+      rawMask,
+      detection.box,
+      INFERENCE_CONFIG.INPUT_SIZE,
+    );
+    const rawPixelCount = countMaskPixels(rawMask);
+    const croppedPixelCount = countMaskPixels(mask);
+    const totalPixels = INFERENCE_CONFIG.INPUT_SIZE ** 2;
 
-    // Calculate nutrition using physics-based algorithm
+    console.log("[Postprocess] Mask stats", {
+      classId: detection.classId,
+      label: foodInfo.name,
+      confidence: Number(detection.confidence.toFixed(3)),
+      box: {
+        x: Number(detection.box.x.toFixed(3)),
+        y: Number(detection.box.y.toFixed(3)),
+        width: Number(detection.box.width.toFixed(3)),
+        height: Number(detection.box.height.toFixed(3)),
+        areaRatio: Number(
+          (detection.box.width * detection.box.height).toFixed(4),
+        ),
+      },
+      rawPixelCount,
+      croppedPixelCount,
+      rawMaskRatio: Number((rawPixelCount / totalPixels).toFixed(4)),
+      croppedMaskRatio: Number((croppedPixelCount / totalPixels).toFixed(4)),
+    });
+
+    // Calculate nutrition using calibrated portion scaling
     const nutrition = calculateNutrition(mask, foodInfo);
 
     // Create complete detection result
@@ -56,25 +89,10 @@ export async function processDetections(
 function generateMask(
   coeffs: Float32Array,
   protos: Float32Array,
-  dims: number[]
+  dims: number[],
 ): number[] {
   const [_, numProtos, protoH, protoW] = dims; // [1, 32, 160, 160]
   const outputSize = protoH * protoW; // 25,600 pixels
-
-  // Debug: Check input data
-  console.log('[Mask Gen] Input check:', {
-    dims,
-    numProtos,
-    protoH,
-    protoW,
-    outputSize,
-    coeffsLength: coeffs.length,
-    protosLength: protos.length,
-    coeffsSample: Array.from(coeffs.slice(0, 5)),
-    protosSample: Array.from(protos.slice(0, 5)),
-    coeffsHasNaN: Array.from(coeffs).some(v => isNaN(v)),
-    protosHasNaN: Array.from(protos).some(v => isNaN(v)),
-  });
 
   // Matrix multiplication: (1x32) @ (32x25600) = (1x25600)
   // Each prototype is weighted by its coefficient
@@ -92,12 +110,6 @@ function generateMask(
     mask[i] = 1 / (1 + Math.exp(-sum));
   }
 
-  // Debug: Check mask values before resize
-  const maskMin = Math.min(...mask);
-  const maskMax = Math.max(...mask);
-  const maskMean = mask.reduce((sum, val) => sum + val, 0) / mask.length;
-  console.log('[Mask Gen] Before resize:', { min: maskMin, max: maskMax, mean: maskMean });
-
   // Resize from 160x160 to 640x640 and binarize
   const binaryMask = resizeAndBinarizeMask(
     mask,
@@ -105,12 +117,8 @@ function generateMask(
     protoW,
     INFERENCE_CONFIG.INPUT_SIZE,
     INFERENCE_CONFIG.INPUT_SIZE,
-    INFERENCE_CONFIG.MASK_THRESHOLD
+    INFERENCE_CONFIG.MASK_THRESHOLD,
   );
-
-  // Debug: Check binary mask
-  const pixelCount = binaryMask.reduce((sum, val) => sum + val, 0);
-  console.log('[Mask Gen] After resize:', { length: binaryMask.length, pixelCount });
 
   return binaryMask;
 }
@@ -131,7 +139,7 @@ function resizeAndBinarizeMask(
   srcW: number,
   dstH: number,
   dstW: number,
-  threshold: number
+  threshold: number,
 ): number[] {
   const result = new Array(dstH * dstW);
   const scaleX = srcW / dstW;
@@ -153,36 +161,54 @@ function resizeAndBinarizeMask(
 }
 
 /**
- * CRITICAL: Calculate nutrition using the exact NutriScan physics-based algorithm
- *
- * Algorithm steps:
- * 1. Count mask pixels (area in pixels)
- * 2. Convert pixel area to real-world area (cm²) using calibration ratio
- * 3. Calculate volume (cm³) using food-specific thickness
- * 4. Calculate weight (g) using food-specific density
- * 5. Calculate calories and macros from weight
- *
- * Calibration: 640px = 30cm (pixel_ratio = 30/640 cm per pixel)
- *
+ * Crop a full-image mask to the detection bounding box.
+ * YOLOv8 segmentation mask coefficients can produce activations outside the object;
+ * restricting to bbox keeps area estimation aligned with the detection extent.
+ */
+function cropMaskToBoundingBox(
+  mask: number[],
+  box: BoundingBox,
+  imageSize: number,
+): number[] {
+  const xMinNorm = clamp01(box.x - box.width / 2);
+  const yMinNorm = clamp01(box.y - box.height / 2);
+  const xMaxNorm = clamp01(box.x + box.width / 2);
+  const yMaxNorm = clamp01(box.y + box.height / 2);
+
+  const xMin = Math.floor(xMinNorm * imageSize);
+  const yMin = Math.floor(yMinNorm * imageSize);
+  const xMax = Math.ceil(xMaxNorm * imageSize);
+  const yMax = Math.ceil(yMaxNorm * imageSize);
+
+  if (xMin >= xMax || yMin >= yMax) {
+    return new Array(mask.length).fill(0);
+  }
+
+  const croppedMask = new Array(mask.length).fill(0);
+  for (let y = yMin; y < yMax; y++) {
+    for (let x = xMin; x < xMax; x++) {
+      const idx = y * imageSize + x;
+      croppedMask[idx] = mask[idx];
+    }
+  }
+  return croppedMask;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+/**
+ * Calculate nutrition using calibrated portion lookup and mask scaling
  * @param mask - Binary mask (640x640 flat array)
- * @param foodInfo - Food metadata (density, thickness, nutrition per 100g)
+ * @param foodInfo - Food metadata (portion defaults, mask ratio, nutrition per 100g)
  * @returns Calculated nutrition information
  */
 function calculateNutrition(mask: number[], foodInfo: FoodInfo): NutritionInfo {
-  // Step 1: Count mask pixels (area in pixels)
+  const totalPixels = INFERENCE_CONFIG.INPUT_SIZE ** 2; // 409,600
   const pixelCount = mask.reduce((sum, val) => sum + val, 0);
 
-  console.log('[Nutrition Calc]', {
-    food: foodInfo.name,
-    maskLength: mask.length,
-    pixelCount,
-    density: foodInfo.density,
-    thickness: foodInfo.defaultThicknessCm,
-  });
-
-  // If no pixels, return zero nutrition
   if (pixelCount === 0) {
-    console.warn('[Nutrition Calc] WARNING: Pixel count is 0 for', foodInfo.name);
     return {
       weightGrams: 0,
       calories: 0,
@@ -193,32 +219,38 @@ function calculateNutrition(mask: number[], foodInfo: FoodInfo): NutritionInfo {
     };
   }
 
-  // Step 2: Pixel-to-real-world scaling
-  // Assumption: 640px = 30cm in real world
-  const pixelRatio = INFERENCE_CONFIG.PIXEL_RATIO; // 30 / 640 cm per pixel
+  const maskRatio = pixelCount / totalPixels;
+  const calibratedMaskRatio =
+    maskRatio * INFERENCE_CONFIG.MASK_RATIO_CALIBRATION;
+  const scaleFactor = calibratedMaskRatio / foodInfo.expectedMaskRatio;
+  const unclampedWeightGrams = foodInfo.defaultPortionWeightG * scaleFactor;
+  const weightGrams = Math.min(unclampedWeightGrams, foodInfo.maxWeightG);
+  const scale = weightGrams / 100;
+  const capped = unclampedWeightGrams > foodInfo.maxWeightG;
 
-  // Calculate real area in cm²
-  const areaRealCm2 = pixelCount * (pixelRatio ** 2);
-
-  // Step 3: Volume estimation (cm³)
-  // Volume = Area × Thickness
-  const volumeCm3 = areaRealCm2 * foodInfo.defaultThicknessCm;
-
-  // Step 4: Weight calculation (grams)
-  // Weight = Volume × Density
-  const weightGrams = volumeCm3 * foodInfo.density;
-
-  // Step 5: Nutrition calculation from weight
-  // Database values are per 100g, so scale by (weight / 100)
-  const scaleFactor = weightGrams / 100;
+  console.log("[Nutrition] Weight calculation", {
+    food: foodInfo.name,
+    pixelCount,
+    totalPixels,
+    maskRatio: Number(maskRatio.toFixed(4)),
+    maskRatioCalibration: INFERENCE_CONFIG.MASK_RATIO_CALIBRATION,
+    calibratedMaskRatio: Number(calibratedMaskRatio.toFixed(4)),
+    expectedMaskRatio: foodInfo.expectedMaskRatio,
+    scaleFactor: Number(scaleFactor.toFixed(3)),
+    defaultPortionWeightG: foodInfo.defaultPortionWeightG,
+    unclampedWeightGrams: Number(unclampedWeightGrams.toFixed(1)),
+    maxWeightG: foodInfo.maxWeightG,
+    weightGrams: Number(weightGrams.toFixed(1)),
+    capped,
+  });
 
   return {
     weightGrams,
-    calories: scaleFactor * foodInfo.caloriesPer100g,
-    protein: scaleFactor * foodInfo.proteinPer100g,
-    carbs: scaleFactor * foodInfo.carbsPer100g,
-    fat: scaleFactor * foodInfo.fatPer100g,
-    fiber: scaleFactor * foodInfo.fiberPer100g,
+    calories: scale * foodInfo.caloriesPer100g,
+    protein: scale * foodInfo.proteinPer100g,
+    carbs: scale * foodInfo.carbsPer100g,
+    fat: scale * foodInfo.fatPer100g,
+    fiber: scale * foodInfo.fiberPer100g,
   };
 }
 
@@ -244,7 +276,7 @@ export function aggregateNutrition(detections: Detection[]): NutritionInfo {
       carbs: 0,
       fat: 0,
       fiber: 0,
-    }
+    },
   );
 }
 
@@ -255,32 +287,4 @@ export function aggregateNutrition(detections: Detection[]): NutritionInfo {
  */
 export function countMaskPixels(mask: number[]): number {
   return mask.reduce((sum, val) => sum + val, 0);
-}
-
-/**
- * Utility: Log nutrition calculation details (for debugging)
- * @param mask - Binary mask
- * @param foodInfo - Food metadata
- * @param nutrition - Calculated nutrition
- */
-export function logNutritionCalculation(
-  mask: number[],
-  foodInfo: FoodInfo,
-  nutrition: NutritionInfo
-): void {
-  const pixelCount = countMaskPixels(mask);
-  const pixelRatio = INFERENCE_CONFIG.PIXEL_RATIO;
-  const areaRealCm2 = pixelCount * (pixelRatio ** 2);
-  const volumeCm3 = areaRealCm2 * foodInfo.defaultThicknessCm;
-
-  console.log('[Nutrition Calculation]', {
-    food: foodInfo.name,
-    pixelCount,
-    areaRealCm2: areaRealCm2.toFixed(2),
-    volumeCm3: volumeCm3.toFixed(2),
-    density: foodInfo.density,
-    thickness: foodInfo.defaultThicknessCm,
-    weightGrams: nutrition.weightGrams.toFixed(1),
-    calories: nutrition.calories.toFixed(0),
-  });
 }

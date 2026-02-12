@@ -45,5 +45,7 @@ export const INFERENCE_CONFIG = {
   IOU_THRESHOLD: 0.45,
   MAX_DETECTIONS: 100,
   MASK_THRESHOLD: 0.5,
-  PIXEL_RATIO: 30 / 640, // 30cm real world = 640px assumption
+  // Empirical correction factor: raw YOLO mask coverage is larger than calibrated table ratios.
+  // 0.22 means "use ~22% of measured mask area" for portion scaling.
+  MASK_RATIO_CALIBRATION: 0.22,
 } as const;
