@@ -55,7 +55,7 @@ export interface Detection {
   /** Bounding box in normalized coordinates */
   box: BoundingBox;
   /** Segmentation mask (640x640 flat array of 0/1 values) */
-  mask: number[];
+  mask: Uint8Array;
   /** Calculated nutrition information */
   nutrition: NutritionInfo;
   /** Food emoji icon */

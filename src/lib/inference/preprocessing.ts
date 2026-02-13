@@ -4,8 +4,8 @@
  * Output format: Float32Array in NCHW layout [1, 3, 640, 640]
  */
 
-import * as ort from 'onnxruntime-web';
-import { INFERENCE_CONFIG } from '@/lib/constants';
+import * as ort from "onnxruntime-web";
+import { INFERENCE_CONFIG } from "@/lib/constants";
 
 /**
  * Convert base64 data URL or ImageBitmap to ONNX Tensor
@@ -13,11 +13,11 @@ import { INFERENCE_CONFIG } from '@/lib/constants';
  * @returns ONNX Tensor in NCHW format [1, 3, 640, 640], normalized to [0, 1]
  */
 export async function preprocessImage(
-  imageData: string | ImageBitmap
+  imageData: string | ImageBitmap,
 ): Promise<ort.Tensor> {
   // Step 1: Decode base64 to ImageBitmap (if needed)
   const bitmap =
-    typeof imageData === 'string'
+    typeof imageData === "string"
       ? await decodeBase64ToImageBitmap(imageData)
       : imageData;
 
@@ -25,14 +25,22 @@ export async function preprocessImage(
   const resized = await resizeImageBitmap(
     bitmap,
     INFERENCE_CONFIG.INPUT_SIZE,
-    INFERENCE_CONFIG.INPUT_SIZE
+    INFERENCE_CONFIG.INPUT_SIZE,
   );
+
+  // Release original bitmap if we created it from base64
+  if (typeof imageData === "string") {
+    bitmap.close();
+  }
 
   // Step 3: Extract RGB pixels and convert to tensor
   const tensorData = await bitmapToTensorData(resized);
 
+  // Release resized bitmap
+  resized.close();
+
   // Step 4: Create ONNX tensor
-  return new ort.Tensor('float32', tensorData, [
+  return new ort.Tensor("float32", tensorData, [
     1,
     3,
     INFERENCE_CONFIG.INPUT_SIZE,
@@ -61,12 +69,12 @@ async function decodeBase64ToImageBitmap(base64: string): Promise<ImageBitmap> {
 async function resizeImageBitmap(
   source: ImageBitmap,
   width: number,
-  height: number
+  height: number,
 ): Promise<ImageBitmap> {
   return createImageBitmap(source, {
     resizeWidth: width,
     resizeHeight: height,
-    resizeQuality: 'high',
+    resizeQuality: "high",
   });
 }
 
@@ -79,23 +87,17 @@ async function bitmapToTensorData(bitmap: ImageBitmap): Promise<Float32Array> {
   const width = bitmap.width;
   const height = bitmap.height;
 
-  // Use OffscreenCanvas if available (worker context), otherwise regular Canvas
-  let canvas: OffscreenCanvas | HTMLCanvasElement;
-  let ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
-
-  if (typeof OffscreenCanvas !== 'undefined') {
-    canvas = new OffscreenCanvas(width, height);
-    ctx = canvas.getContext('2d');
-  } else {
-    // Fallback for environments without OffscreenCanvas
-    canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    ctx = canvas.getContext('2d');
+  // OffscreenCanvas is required in Worker context (document is not available).
+  // Supported on iOS 17+, Chrome 69+, Firefox 105+.
+  if (typeof OffscreenCanvas === "undefined") {
+    throw new Error("OffscreenCanvas is not supported in this browser");
   }
 
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+
   if (!ctx) {
-    throw new Error('Failed to get canvas context');
+    throw new Error("Failed to get canvas context");
   }
 
   // Draw bitmap to canvas
@@ -138,7 +140,7 @@ export function logTensorStats(tensor: ort.Tensor): void {
   const max = Math.max(...data);
   const mean = data.reduce((sum, val) => sum + val, 0) / data.length;
 
-  console.log('[Preprocessing] Tensor Stats:', {
+  console.log("[Preprocessing] Tensor Stats:", {
     shape: tensor.dims,
     min: min.toFixed(4),
     max: max.toFixed(4),

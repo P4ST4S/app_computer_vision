@@ -38,29 +38,6 @@ export async function processDetections(
       detection.box,
       INFERENCE_CONFIG.INPUT_SIZE,
     );
-    const rawPixelCount = countMaskPixels(rawMask);
-    const croppedPixelCount = countMaskPixels(mask);
-    const totalPixels = INFERENCE_CONFIG.INPUT_SIZE ** 2;
-
-    console.log("[Postprocess] Mask stats", {
-      classId: detection.classId,
-      label: foodInfo.name,
-      confidence: Number(detection.confidence.toFixed(3)),
-      box: {
-        x: Number(detection.box.x.toFixed(3)),
-        y: Number(detection.box.y.toFixed(3)),
-        width: Number(detection.box.width.toFixed(3)),
-        height: Number(detection.box.height.toFixed(3)),
-        areaRatio: Number(
-          (detection.box.width * detection.box.height).toFixed(4),
-        ),
-      },
-      rawPixelCount,
-      croppedPixelCount,
-      rawMaskRatio: Number((rawPixelCount / totalPixels).toFixed(4)),
-      croppedMaskRatio: Number((croppedPixelCount / totalPixels).toFixed(4)),
-    });
-
     // Calculate nutrition using calibrated portion scaling
     const nutrition = calculateNutrition(mask, foodInfo);
 
@@ -90,7 +67,7 @@ function generateMask(
   coeffs: Float32Array,
   protos: Float32Array,
   dims: number[],
-): number[] {
+): Uint8Array {
   const [_, numProtos, protoH, protoW] = dims; // [1, 32, 160, 160]
   const outputSize = protoH * protoW; // 25,600 pixels
 
@@ -131,7 +108,7 @@ function generateMask(
  * @param dstH - Target height (640)
  * @param dstW - Target width (640)
  * @param threshold - Binarization threshold (0.5)
- * @returns Binary mask array (640x640 = 409,600 values of 0 or 1)
+ * @returns Binary mask Uint8Array (640x640 = 409,600 values of 0 or 1)
  */
 function resizeAndBinarizeMask(
   mask: Float32Array,
@@ -140,8 +117,8 @@ function resizeAndBinarizeMask(
   dstH: number,
   dstW: number,
   threshold: number,
-): number[] {
-  const result = new Array(dstH * dstW);
+): Uint8Array {
+  const result = new Uint8Array(dstH * dstW);
   const scaleX = srcW / dstW;
   const scaleY = srcH / dstH;
 
@@ -166,10 +143,10 @@ function resizeAndBinarizeMask(
  * restricting to bbox keeps area estimation aligned with the detection extent.
  */
 function cropMaskToBoundingBox(
-  mask: number[],
+  mask: Uint8Array,
   box: BoundingBox,
   imageSize: number,
-): number[] {
+): Uint8Array {
   const xMinNorm = clamp01(box.x - box.width / 2);
   const yMinNorm = clamp01(box.y - box.height / 2);
   const xMaxNorm = clamp01(box.x + box.width / 2);
@@ -181,10 +158,10 @@ function cropMaskToBoundingBox(
   const yMax = Math.ceil(yMaxNorm * imageSize);
 
   if (xMin >= xMax || yMin >= yMax) {
-    return new Array(mask.length).fill(0);
+    return new Uint8Array(mask.length);
   }
 
-  const croppedMask = new Array(mask.length).fill(0);
+  const croppedMask = new Uint8Array(mask.length);
   for (let y = yMin; y < yMax; y++) {
     for (let x = xMin; x < xMax; x++) {
       const idx = y * imageSize + x;
@@ -204,9 +181,13 @@ function clamp01(value: number): number {
  * @param foodInfo - Food metadata (portion defaults, mask ratio, nutrition per 100g)
  * @returns Calculated nutrition information
  */
-function calculateNutrition(mask: number[], foodInfo: FoodInfo): NutritionInfo {
+function calculateNutrition(
+  mask: Uint8Array,
+  foodInfo: FoodInfo,
+): NutritionInfo {
   const totalPixels = INFERENCE_CONFIG.INPUT_SIZE ** 2; // 409,600
-  const pixelCount = mask.reduce((sum, val) => sum + val, 0);
+  let pixelCount = 0;
+  for (let i = 0; i < mask.length; i++) pixelCount += mask[i];
 
   if (pixelCount === 0) {
     return {
@@ -226,24 +207,6 @@ function calculateNutrition(mask: number[], foodInfo: FoodInfo): NutritionInfo {
   const unclampedWeightGrams = foodInfo.defaultPortionWeightG * scaleFactor;
   const weightGrams = Math.min(unclampedWeightGrams, foodInfo.maxWeightG);
   const scale = weightGrams / 100;
-  const capped = unclampedWeightGrams > foodInfo.maxWeightG;
-
-  console.log("[Nutrition] Weight calculation", {
-    food: foodInfo.name,
-    pixelCount,
-    totalPixels,
-    maskRatio: Number(maskRatio.toFixed(4)),
-    maskRatioCalibration: INFERENCE_CONFIG.MASK_RATIO_CALIBRATION,
-    calibratedMaskRatio: Number(calibratedMaskRatio.toFixed(4)),
-    expectedMaskRatio: foodInfo.expectedMaskRatio,
-    scaleFactor: Number(scaleFactor.toFixed(3)),
-    defaultPortionWeightG: foodInfo.defaultPortionWeightG,
-    unclampedWeightGrams: Number(unclampedWeightGrams.toFixed(1)),
-    maxWeightG: foodInfo.maxWeightG,
-    weightGrams: Number(weightGrams.toFixed(1)),
-    capped,
-  });
-
   return {
     weightGrams,
     calories: scale * foodInfo.caloriesPer100g,
@@ -285,6 +248,8 @@ export function aggregateNutrition(detections: Detection[]): NutritionInfo {
  * @param mask - Binary mask array
  * @returns Number of non-zero pixels
  */
-export function countMaskPixels(mask: number[]): number {
-  return mask.reduce((sum, val) => sum + val, 0);
+export function countMaskPixels(mask: Uint8Array): number {
+  let count = 0;
+  for (let i = 0; i < mask.length; i++) count += mask[i];
+  return count;
 }

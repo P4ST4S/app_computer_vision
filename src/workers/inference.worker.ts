@@ -52,26 +52,19 @@ async function initializeSession(): Promise<void> {
     ort.env.wasm.wasmPaths =
       "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.1/dist/";
     ort.env.wasm.numThreads = 1; // Start with single thread for compatibility
-    ort.env.logLevel = "verbose"; // Enable verbose logging for debugging
-
-    console.log("[Worker] ONNX Runtime environment configured");
-    console.log("[Worker] WASM paths:", ort.env.wasm.wasmPaths);
+    ort.env.logLevel = "warning";
 
     // Create inference session with more compatible settings
     // Use absolute URL for model in worker context
     // Use APP_BASE_URL if set (for production), otherwise use current origin
     const baseUrl = APP_BASE_URL || self.location.origin;
     const modelUrl = new URL(INFERENCE_CONFIG.MODEL_PATH, baseUrl).href;
-    console.log("[Worker] Base URL:", baseUrl);
-    console.log("[Worker] Loading model from:", modelUrl);
     session = await ort.InferenceSession.create(modelUrl, {
       executionProviders: ["wasm"], // WebAssembly backend
       graphOptimizationLevel: "basic", // Start with basic optimization
     });
 
     console.log("[Worker] Session initialized successfully");
-    console.log("[Worker] Input names:", session.inputNames);
-    console.log("[Worker] Output names:", session.outputNames);
   } catch (error) {
     initError = error as Error;
     console.error("[Worker] Session initialization failed:", error);
@@ -122,12 +115,15 @@ async function runInference(
     throw new Error("Failed to initialize ONNX session");
   }
 
+  let inputTensor: ort.Tensor | null = null;
+  let outputs: ort.InferenceSession.ReturnType | null = null;
+
   try {
     // Step 1: Preprocess image to tensor
-    const inputTensor = await preprocessImage(imageData);
+    inputTensor = await preprocessImage(imageData);
 
     // Step 2: Run ONNX inference
-    const outputs = await session.run({ images: inputTensor });
+    outputs = await session.run({ images: inputTensor });
 
     // YOLOv8-seg outputs (custom 32-class model):
     // output0: [1, 68, 8400] - Detection boxes (4) + class scores (32) + mask coefficients (32)
@@ -140,21 +136,7 @@ async function runInference(
       throw new Error("Missing model outputs");
     }
 
-    // Debug: Check ONNX outputs
     const output0Data = output0.data as Float32Array;
-    const output1Data = output1.data as Float32Array;
-    console.log("[Worker] ONNX outputs:", {
-      output0Dims: [...output0.dims],
-      output1Dims: [...output1.dims],
-      output0Sample: Array.from(output0Data.slice(0, 5)),
-      output1Sample: Array.from(output1Data.slice(0, 5)),
-      output0HasNaN: Array.from(output0Data.slice(0, 1000)).some((v) =>
-        isNaN(v),
-      ),
-      output1HasNaN: Array.from(output1Data.slice(0, 1000)).some((v) =>
-        isNaN(v),
-      ),
-    });
 
     // Step 3: Parse YOLO outputs to raw detections
     const rawDetections = parseYOLOOutput(
@@ -162,25 +144,8 @@ async function runInference(
       [...output0.dims], // Convert readonly array to mutable
     );
 
-    console.log(`[Worker] Parsed ${rawDetections.length} raw detections`);
-    logDetectionBoxStats(rawDetections, "raw");
-
-    // Debug: Check first detection's mask coefficients
-    if (rawDetections.length > 0) {
-      console.log("[Worker] First detection maskCoeffs:", {
-        length: rawDetections[0].maskCoeffs.length,
-        sample: Array.from(rawDetections[0].maskCoeffs.slice(0, 5)),
-        hasNaN: Array.from(rawDetections[0].maskCoeffs).some((v) => isNaN(v)),
-      });
-    }
-
     // Step 4: Apply Non-Maximum Suppression
     const filteredDetections = applyNMS(rawDetections);
-
-    console.log(
-      `[Worker] After NMS: ${filteredDetections.length} detections remaining`,
-    );
-    logDetectionBoxStats(filteredDetections, "after_nms");
 
     // Step 5: Generate masks and calculate nutrition
     const detections = await processDetections(
@@ -198,7 +163,7 @@ async function runInference(
     const processingTime = performance.now() - startTime;
 
     console.log(
-      `[Worker] Inference complete in ${processingTime.toFixed(0)}ms`,
+      `[Worker] Inference complete in ${processingTime.toFixed(0)}ms, ${detections.length} detections`,
     );
 
     // Return result
@@ -216,6 +181,14 @@ async function runInference(
   } catch (error) {
     console.error("[Worker] Inference failed:", error);
     throw error;
+  } finally {
+    // Dispose tensors to free WASM memory
+    inputTensor?.dispose();
+    if (outputs) {
+      for (const key of Object.keys(outputs)) {
+        outputs[key]?.dispose?.();
+      }
+    }
   }
 }
 
@@ -313,40 +286,6 @@ function parseYOLOOutput(data: Float32Array, dims: number[]): RawDetection[] {
   }
 
   return detections;
-}
-
-function logDetectionBoxStats(
-  detections: RawDetection[],
-  stage: "raw" | "after_nms",
-): void {
-  if (detections.length === 0) {
-    return;
-  }
-
-  const areaRatios = detections.map((d) => d.box.width * d.box.height);
-  const minArea = Math.min(...areaRatios);
-  const maxArea = Math.max(...areaRatios);
-  const meanArea =
-    areaRatios.reduce((sum, a) => sum + a, 0) / areaRatios.length;
-  const largeBoxes = areaRatios.filter((a) => a > 0.6).length;
-
-  console.log("[Worker] Box stats", {
-    stage,
-    count: detections.length,
-    minAreaRatio: Number(minArea.toFixed(4)),
-    maxAreaRatio: Number(maxArea.toFixed(4)),
-    meanAreaRatio: Number(meanArea.toFixed(4)),
-    largeBoxes,
-    sample: detections.slice(0, 5).map((d) => ({
-      classId: d.classId,
-      confidence: Number(d.confidence.toFixed(3)),
-      x: Number(d.box.x.toFixed(3)),
-      y: Number(d.box.y.toFixed(3)),
-      width: Number(d.box.width.toFixed(3)),
-      height: Number(d.box.height.toFixed(3)),
-      areaRatio: Number((d.box.width * d.box.height).toFixed(4)),
-    })),
-  });
 }
 
 // ============================================================================

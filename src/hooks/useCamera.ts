@@ -6,6 +6,7 @@ import { CAMERA_CONFIG } from "@/lib/constants";
 export function useCamera() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -14,7 +15,9 @@ export function useCamera() {
       setError(null);
 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("L'API getUserMedia n'est pas supportée par ce navigateur");
+        throw new Error(
+          "L'API getUserMedia n'est pas supportée par ce navigateur",
+        );
       }
 
       let stream: MediaStream;
@@ -36,11 +39,20 @@ export function useCamera() {
     } catch (err: any) {
       let errorMessage = "Impossible d'accéder à la caméra.";
 
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+      if (
+        err.name === "NotAllowedError" ||
+        err.name === "PermissionDeniedError"
+      ) {
         errorMessage = "Permission refusée. Autorisez l'accès à la caméra.";
-      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+      } else if (
+        err.name === "NotFoundError" ||
+        err.name === "DevicesNotFoundError"
+      ) {
         errorMessage = "Aucune caméra trouvée sur cet appareil.";
-      } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
+      } else if (
+        err.name === "NotReadableError" ||
+        err.name === "TrackStartError"
+      ) {
         errorMessage = "Caméra déjà utilisée par une autre application.";
       }
 
@@ -57,14 +69,30 @@ export function useCamera() {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    // Release canvas memory
+    if (canvasRef.current) {
+      canvasRef.current.width = 0;
+      canvasRef.current.height = 0;
+      canvasRef.current = null;
+    }
     setIsActive(false);
   }, []);
 
   const captureFrame = useCallback((): string | null => {
     if (!videoRef.current) return null;
-    const canvas = document.createElement("canvas");
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
+    const { videoWidth, videoHeight } = videoRef.current;
+    if (!videoWidth || !videoHeight) return null;
+
+    // Reuse canvas across captures to avoid memory pressure on iOS
+    if (!canvasRef.current) {
+      canvasRef.current = document.createElement("canvas");
+    }
+    const canvas = canvasRef.current;
+    if (canvas.width !== videoWidth || canvas.height !== videoHeight) {
+      canvas.width = videoWidth;
+      canvas.height = videoHeight;
+    }
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(videoRef.current, 0, 0);

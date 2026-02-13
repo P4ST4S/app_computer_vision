@@ -3,7 +3,7 @@
  * Provides a clean Promise-based API for communicating with the inference worker
  */
 
-import type { InferenceResult } from './inference/types';
+import type { InferenceResult } from "./inference/types";
 
 /**
  * Client for communicating with the inference Web Worker
@@ -35,8 +35,8 @@ export class InferenceWorkerClient {
     try {
       // Create worker from worker file
       this.worker = new Worker(
-        new URL('../workers/inference.worker.ts', import.meta.url),
-        { type: 'module' }
+        new URL("../workers/inference.worker.ts", import.meta.url),
+        { type: "module" },
       );
 
       // Handle messages from worker
@@ -45,7 +45,10 @@ export class InferenceWorkerClient {
 
         const pending = this.pendingRequests.get(id);
         if (!pending) {
-          console.warn('[WorkerClient] Received response for unknown request:', id);
+          console.warn(
+            "[WorkerClient] Received response for unknown request:",
+            id,
+          );
           return;
         }
 
@@ -58,7 +61,7 @@ export class InferenceWorkerClient {
         this.pendingRequests.delete(id);
 
         // Handle response
-        if (type === 'ERROR') {
+        if (type === "ERROR") {
           pending.reject(new Error(payload.message));
         } else {
           pending.resolve(payload);
@@ -67,19 +70,19 @@ export class InferenceWorkerClient {
 
       // Handle worker errors
       this.worker.onerror = (error) => {
-        console.error('[WorkerClient] Worker error:', error);
+        console.error("[WorkerClient] Worker error:", error);
 
         // Reject all pending requests
         this.pendingRequests.forEach((pending) => {
           if (pending.timeout) clearTimeout(pending.timeout);
-          pending.reject(new Error('Worker crashed'));
+          pending.reject(new Error("Worker crashed"));
         });
         this.pendingRequests.clear();
       };
 
-      console.log('[WorkerClient] Worker initialized');
+      console.log("[WorkerClient] Worker initialized");
     } catch (error) {
-      console.error('[WorkerClient] Failed to create worker:', error);
+      console.error("[WorkerClient] Failed to create worker:", error);
       throw error;
     }
   }
@@ -94,11 +97,11 @@ export class InferenceWorkerClient {
   private sendMessage<T>(
     type: string,
     payload?: any,
-    timeoutMs: number = 30000
+    timeoutMs: number = 30000,
   ): Promise<T> {
     return new Promise((resolve, reject) => {
       if (!this.worker) {
-        reject(new Error('Worker not initialized'));
+        reject(new Error("Worker not initialized"));
         return;
       }
 
@@ -124,7 +127,7 @@ export class InferenceWorkerClient {
    * @returns Promise that resolves when model is loaded
    */
   async initialize(): Promise<void> {
-    return this.sendMessage<void>('INIT', undefined, 10000); // 10s timeout for model loading
+    return this.sendMessage<void>("INIT", undefined, 60000); // 60s timeout for model loading (52MB on mobile)
   }
 
   /**
@@ -133,7 +136,7 @@ export class InferenceWorkerClient {
    * @returns Promise that resolves with inference results
    */
   async infer(imageData: string): Promise<InferenceResult> {
-    return this.sendMessage<InferenceResult>('INFER', { imageData }, 30000); // 30s timeout
+    return this.sendMessage<InferenceResult>("INFER", { imageData }, 30000); // 30s timeout
   }
 
   /**
@@ -143,9 +146,9 @@ export class InferenceWorkerClient {
     if (this.worker) {
       // Send terminate message (best effort, don't wait)
       try {
-        this.worker.postMessage({ id: 'cleanup', type: 'TERMINATE' });
+        this.worker.postMessage({ id: "cleanup", type: "TERMINATE" });
       } catch (error) {
-        console.warn('[WorkerClient] Failed to send TERMINATE message:', error);
+        console.warn("[WorkerClient] Failed to send TERMINATE message:", error);
       }
 
       // Terminate worker
@@ -156,11 +159,11 @@ export class InferenceWorkerClient {
     // Clear all pending requests
     this.pendingRequests.forEach((pending) => {
       if (pending.timeout) clearTimeout(pending.timeout);
-      pending.reject(new Error('Worker terminated'));
+      pending.reject(new Error("Worker terminated"));
     });
     this.pendingRequests.clear();
 
-    console.log('[WorkerClient] Worker terminated');
+    console.log("[WorkerClient] Worker terminated");
   }
 
   /**
